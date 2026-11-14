@@ -79,6 +79,16 @@ Four stems (drums, bass, other, vocals), 44.1 kHz stereo. Sources and checksums 
 
 Reference stems come from the original model (`tools/run_reference.py`); the corpus is
 12 excerpts picked by `tools/make_excerpts.py`, plus full tracks and 48/22.05 kHz inputs.
+Current results (CPU, every stem passes):
+
+| Set | Stems | Min SNR | Worst 1 s window | Worst SDR change |
+|-|-:|-:|-:|-:|
+| 12 MUSDB excerpts, 25 s | 48 | 91.6 dB | 85.6 dB | -0.000015 dB |
+| 3 full MUSDB tracks, 76-430 s | 12 | 98.1 dB | 84.5 dB | -0.000001 dB |
+| 48 kHz, 22.05 kHz, mono inputs | 20 | 112.7 dB | 89.4 dB | (no true stems) |
+
+On a Ryzen 7 7840HS with 8 threads, CPU separation runs at about 0.75-1.0x real time and
+peaks at 6.9-7.7 GB of RAM on 4-7 minute tracks; GPU timings are in the GPU section.
 
 ```sh
 build/separate -model models/scnet-large/scnet-large.onnx -out data/results/native data/excerpts/*/mixture.wav
