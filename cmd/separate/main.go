@@ -1,7 +1,7 @@
 // Command separate splits audio files into stems with the native library.
 // Development tool: decodes with ffmpeg, writes float32 WAVs.
 //
-//	go run ./cmd/separate -model ../models/scnet-large/scnet-large.onnx -out ../data/results/native song.wav ...
+//	go run ./cmd/separate -out stems song.mp3 ...
 //
 // Output: <out>/<name>/{drums,bass,other,vocals}.wav, where <name> is the file name,
 // or the folder name for MUSDB-style <track>/mixture.wav inputs.
@@ -22,14 +22,15 @@ import (
 	"strings"
 	"time"
 
-	stems "github.com/bartoval/steammeros/go"
+	stems "github.com/bartoval/steammeros"
 )
 
 func main() {
 	model := flag.String("model", "models/scnet-large/scnet-large.onnx", "path to the .onnx model")
 	out := flag.String("out", "stems-out", "output folder")
 	threads := flag.Int("threads", 0, "inference threads (0 = automatic; 1 = sequential pipeline)")
-	cuda := flag.Int("cuda", -1, "run the model on this GPU (needs a STEMS_CUDA build); -1 = CPU")
+	cuda := flag.Int("cuda", -1, "run the model on this GPU (needs a GPU build of ONNX Runtime); -1 = CPU")
+	ort := flag.String("ort", "", "ONNX Runtime shared library (default: $STEMS_ORT_LIBRARY, then system locations)")
 	flag.Parse()
 
 	// Ctrl-C cancels the separation in progress instead of killing the process mid-write.
@@ -37,7 +38,9 @@ func main() {
 	defer stop()
 
 	start := time.Now()
-	engine, err := stems.NewEngine(stems.Options{ModelPath: *model, Threads: *threads, CUDA: *cuda >= 0, CUDADevice: *cuda})
+	engine, err := stems.NewEngine(stems.Options{
+		ModelPath: *model, Threads: *threads, CUDA: *cuda >= 0, CUDADevice: *cuda, ORTLibrary: *ort,
+	})
 	if err != nil {
 		fail(err)
 	}

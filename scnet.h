@@ -34,8 +34,8 @@ class ScnetModel {
     Ort::Value spectrum;
   };
 
-  // `cuda_device` >= 0 runs the network on that GPU (STFT and the rest stay on the CPU);
-  // -1 runs everything on the CPU.
+  // Needs load_onnxruntime() first. `cuda_device` >= 0 runs the network on that GPU (STFT and the rest stay
+  // on the CPU); -1 runs everything on the CPU.
   ScnetModel(const std::string& onnx_path, int threads, int cuda_device);
   ~ScnetModel();
 

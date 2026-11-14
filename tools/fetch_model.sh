@@ -12,7 +12,16 @@ URL=${STEMS_MODEL_URL:-https://github.com/bartoval/steammeros/releases/download/
 root=$(cd "$(dirname "$0")/.." && pwd)
 model=$root/models/scnet-large/scnet-large.onnx
 
-if [[ -f $model ]] && echo "$SHA256  $model" | sha256sum -c --status -; then
+# sha256sum on Linux, shasum on macOS.
+sha256_ok() {
+  if command -v sha256sum > /dev/null; then
+    echo "$SHA256  $1" | sha256sum -c "${@:2}" -
+  else
+    echo "$SHA256  $1" | shasum -a 256 -c "${@:2}" -
+  fi
+}
+
+if [[ -f $model ]] && sha256_ok "$model" --status; then
   echo "already there: $model"
   exit 0
 fi
@@ -20,6 +29,6 @@ fi
 mkdir -p "$(dirname "$model")"
 trap 'rm -f "$model.part"' EXIT  # no half-downloaded file left behind
 curl -fsSL --retry 3 -o "$model.part" "$URL"
-echo "$SHA256  $model.part" | sha256sum -c -
+sha256_ok "$model.part"
 mv "$model.part" "$model"
 echo "model in $model"

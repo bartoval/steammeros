@@ -49,9 +49,6 @@ void use_cuda(Ort::SessionOptions& options, int device) {
 }  // namespace
 
 ScnetModel::ScnetModel(const std::string& onnx_path, int threads, int cuda_device) {
-  if (std::string(OrtGetApiBase()->GetVersionString()) != STEMS_ORT_VERSION) {
-    throw Ort::Exception("ONNX Runtime version mismatch: expected " STEMS_ORT_VERSION, ORT_FAIL);
-  }
   if (threads <= 0) threads = std::max(1u, std::thread::hardware_concurrency() / 2);
   fft_threads_ = std::min(threads, 4);
 

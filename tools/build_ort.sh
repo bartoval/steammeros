@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # Builds ONNX Runtime (CPU) from source as static libraries, in third_party/onnxruntime.
-# Our CMake then merges them into libstems.a, so nothing ships as a .so.
+# Only for the static build: our CMake merges them into libstems.a, so nothing ships as a .so.
 #
 #   tools/build_ort.sh        # ~30-60 min the first time
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SRC=$ROOT/third_party/onnxruntime
+
+# A go.mod makes Go's ./... skip this folder (ONNX Runtime's sources contain Go files).
+mkdir -p "$ROOT/third_party" && echo "module thirdparty" > "$ROOT/third_party/go.mod"
 ORT_VERSION=$(sed -n 's/^onnxruntime==//p' "$ROOT/tools/requirements.lock")
 ORT_COMMIT=6af1a932e2286d5c58166085d24c68783033edee
 

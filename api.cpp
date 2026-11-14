@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "onnxruntime_cxx_api.h"
+#include "ort.h"
 #include "resample.h"
 #include "scnet.h"
 #include "separator.h"
@@ -109,6 +110,7 @@ stems_status stems_engine_create(const stems_engine_options* options, stems_engi
   return guarded(error, STEMS_ERR_MODEL, [&] {
     auto created = std::make_unique<stems_engine>();
     const int cuda_device = options->use_cuda ? options->cuda_device : -1;
+    stems::load_onnxruntime(options->ort_library ? options->ort_library : "");
     created->model = std::make_unique<stems::ScnetModel>(options->model_path, options->threads, cuda_device);
     *engine = created.release();
   });
@@ -124,6 +126,7 @@ const char* stems_engine_stem_name(const stems_engine*, int32_t stem) {
 }
 
 stems_job* stems_job_create(void) {
+  if (!stems::onnxruntime_loaded()) return nullptr;  // a job holds ORT run options
   try {
     return new stems_job();
   } catch (...) {

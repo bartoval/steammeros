@@ -1,14 +1,13 @@
 // Package stems separates music into stems (drums, bass, other, vocals) in-process.
 //
-// The native library is linked statically through cgo. Build it first and expose
-// it through pkg-config (see README.md):
-//
-//	tools/build_ort.sh && cmake -S . -B build && cmake --build build
-//	export PKG_CONFIG_PATH=$PWD/build/pkgconfig
+// cgo compiles the C++ core in this directory. ONNX Runtime is loaded at run time from
+// its shared library (see Options.ORTLibrary); build with -tags stems_static to link it
+// statically instead (see README.md).
 package stems
 
 /*
-#cgo pkg-config: stems
+#cgo CFLAGS: -I${SRCDIR}
+#cgo CXXFLAGS: -std=c++20 -I${SRCDIR}/external/onnxruntime -I${SRCDIR}/external/pocketfft
 #include <stdlib.h>
 #include "stems.h"
 */
@@ -31,9 +30,16 @@ type Options struct {
 	ModelPath string // path to the .onnx model
 	Threads   int    // inference threads; 0 = automatic, 1 = sequential pipeline
 
-	// CUDA runs the model on an NVIDIA GPU (needs the library built with STEMS_CUDA=ON).
+	// CUDA runs the model on an NVIDIA GPU. Needs a GPU build of ONNX Runtime
+	// (tools/fetch_ort.sh gpu) with CUDA 13 and cuDNN 9 on the system.
 	CUDA       bool
 	CUDADevice int // which GPU, when CUDA is set
+
+	// ORTLibrary is the path to ONNX Runtime's shared library (libonnxruntime.so or
+	// .dylib). Empty: $STEMS_ORT_LIBRARY, then the usual system locations (Homebrew
+	// included). The first engine's library is used for the whole process; ignored
+	// with -tags stems_static.
+	ORTLibrary string
 }
 
 // Engine holds the loaded model. Safe for concurrent use; call Close when done.
@@ -70,6 +76,11 @@ func NewEngine(opts Options) (*Engine, error) {
 
 	path := C.CString(opts.ModelPath)
 	defer C.free(unsafe.Pointer(path))
+	var ortLibrary *C.char
+	if opts.ORTLibrary != "" {
+		ortLibrary = C.CString(opts.ORTLibrary)
+		defer C.free(unsafe.Pointer(ortLibrary))
+	}
 
 	options := C.stems_engine_options{
 		struct_size: C.uint32_t(unsafe.Sizeof(C.stems_engine_options{})),
@@ -77,6 +88,7 @@ func NewEngine(opts Options) (*Engine, error) {
 		threads:     C.int32_t(opts.Threads),
 		use_cuda:    C.int32_t(boolToInt(opts.CUDA)),
 		cuda_device: C.int32_t(opts.CUDADevice),
+		ort_library: ortLibrary,
 	}
 	var engine *C.stems_engine
 	var cerr C.stems_error

@@ -4,5 +4,6 @@ tools/*.py linguist-vendored linguist-detectable=false
 
 # Show the Go package as the repository's primary language.
 # The native C++ core remains part of the library, outside the language statistics.
-src/** linguist-detectable=false
-include/** linguist-detectable=false
+*.cpp linguist-detectable=false
+*.h linguist-detectable=false
+external/** linguist-vendored
