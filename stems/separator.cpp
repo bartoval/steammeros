@@ -116,6 +116,7 @@ void downmix_in_place(std::vector<float>& stems, int64_t samples) {
 // reconstruction keeps the blending order, and bounds retained ORT outputs to two.
 std::vector<float> separate_at_model_rate(const ScnetModel& model, const float* audio, int channels,
                                           int64_t samples, Job& job) {
+  job.throw_if_cancelled();
   if (samples == 0) return {};
 
   ModelInput input = normalized_stereo(audio, channels, samples);
@@ -145,9 +146,12 @@ std::vector<float> separate_at_model_rate(const ScnetModel& model, const float* 
     }
   };
 
+  // Reconstruction takes a while (~0.3 s per chunk on CPU): check before and after it.
   const auto reconstruct_and_blend = [&](ScnetModel::Output prediction, int64_t offset) {
+    job.throw_if_cancelled();
     std::vector<float> chunk(kSignals * prediction.samples);
     model.reconstruct(prediction, chunk.data());
+    job.throw_if_cancelled();
     blender.add(chunk, prediction.samples, offset);
     job.set_progress(static_cast<double>(++chunks_done) / chunks);
   };
@@ -205,8 +209,8 @@ Separation separate_track(const ScnetModel& model, const float* audio, int chann
   const Resampler back(kSamplerate, samplerate);
   const int64_t model_frames = to_model.output_length(frames);
 
-  // Resampling can't stop halfway, so check for cancellation after each step: a job
-  // cancelled at the very end must not come back as a success.
+  // Resampling takes ~0.3 s per channel for 4 minutes of audio and doesn't stop halfway:
+  // checking after each pass is enough, and a job cancelled at the very end isn't a success.
   std::vector<float> input = resample_planar(to_model, audio, channels, frames);
   job.throw_if_cancelled();
   const std::vector<float> separated =

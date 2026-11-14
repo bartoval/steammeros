@@ -213,6 +213,9 @@ func (e *Engine) Separate(ctx context.Context, audio [][]float32, sampleRate int
 		return nil, toError(&cerr)
 	}
 	defer C.stems_result_destroy(result)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if progress != nil {
 		progress(1)
 	}
