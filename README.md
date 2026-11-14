@@ -66,6 +66,8 @@ for _, part := range parts {
 - **Blocking call:** `Separate` blocks until done. Cancelling `ctx` stops it within a
   moment, even in the middle of the model, and returns `ctx.Err()`.
 - **Concurrency:** an `Engine` is safe to use from several goroutines.
+- **Errors:** match them with `errors.Is`, for example `errors.Is(err, stems.ErrInvalidArgument)`
+  for bad audio or an unsupported sample rate.
 - **ONNX Runtime location:** `Options.ORTLibrary` sets its path. When empty,
   `$STEMS_ORT_LIBRARY` is used, then the usual system locations.
 
@@ -84,7 +86,7 @@ export STEMS_ORT_LIBRARY=...       # the line it printed
 Then set `CUDA: true` in the options (`-cuda 0` in `cmd/separate`). CUDA 13 and cuDNN 9
 must be installed (`libcudart`, `libcublas`, `libcurand`, `libcufft`, `libcudnn`).
 Precision stays FP32 with TF32 off, so GPU output matches the CPU and the original
-model. A 253 s track takes ~30 s on an RTX 4060 Laptop GPU, with ~6.3 GB of VRAM.
+model. A 253 s track takes ~25 s on an RTX 4060 Laptop GPU, with ~6.3 GB of VRAM.
 
 ## Static build
 
