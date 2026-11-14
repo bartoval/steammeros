@@ -8,7 +8,7 @@
 package main
 
 import (
-	"bytes"
+	"bufio"
 	"encoding/binary"
 	"flag"
 	"fmt"
@@ -106,34 +106,42 @@ func decode(path string) ([][]float32, int, error) {
 }
 
 // Writes a 32-bit float WAV (format tag 3), interleaving the planar channels.
+// Streams through a small buffer instead of building the whole file in memory.
 func writeWav(path string, channels [][]float32, sampleRate int) error {
+	file, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
 	frames := len(channels[0])
 	dataSize := frames * len(channels) * 4
-
-	var buf bytes.Buffer
-	buf.Grow(44 + dataSize)
-	put := func(v any) { binary.Write(&buf, binary.LittleEndian, v) }
-	buf.WriteString("RIFF")
+	out := bufio.NewWriter(file)
+	put := func(v any) { binary.Write(out, binary.LittleEndian, v) }
+	out.WriteString("RIFF")
 	put(uint32(36 + dataSize))
-	buf.WriteString("WAVEfmt ")
-	put(uint32(16))                                  // fmt chunk size
-	put(uint16(3))                                   // IEEE float
-	put(uint16(len(channels)))                       //
-	put(uint32(sampleRate))                          //
-	put(uint32(sampleRate * len(channels) * 4))      // bytes per second
-	put(uint16(len(channels) * 4))                   // bytes per frame
-	put(uint16(32))                                  // bits per sample
-	buf.WriteString("data")
+	out.WriteString("WAVEfmt ")
+	put(uint32(16))                             // fmt chunk size
+	put(uint16(3))                              // IEEE float
+	put(uint16(len(channels)))                  // channels
+	put(uint32(sampleRate))                     // sample rate
+	put(uint32(sampleRate * len(channels) * 4)) // bytes per second
+	put(uint16(len(channels) * 4))              // bytes per frame
+	put(uint16(32))                             // bits per sample
+	out.WriteString("data")
 	put(uint32(dataSize))
 
-	samples := make([]byte, dataSize)
+	var sample [4]byte
 	for i := 0; i < frames; i++ {
 		for c := range channels {
-			binary.LittleEndian.PutUint32(samples[(i*len(channels)+c)*4:], math.Float32bits(channels[c][i]))
+			binary.LittleEndian.PutUint32(sample[:], math.Float32bits(channels[c][i]))
+			out.Write(sample[:])
 		}
 	}
-	buf.Write(samples)
-	return os.WriteFile(path, buf.Bytes(), 0o644)
+	if err := out.Flush(); err != nil {
+		return err
+	}
+	return file.Close()
 }
 
 func fail(err error) {

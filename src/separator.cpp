@@ -17,7 +17,7 @@ constexpr int64_t kStride = kSegment / 2;       // overlap=0.5
 // Where chunks overlap, each one counts proportionally to how far we are from its edges.
 std::vector<float> triangle_weights() {
   std::vector<float> weight(kSegment);
-  const float peak = kSegment / 2;
+  const float peak = kSegment / 2.0f;
   for (int64_t i = 0; i < kSegment; ++i) {
     weight[i] = (i < kSegment / 2 ? i + 1 : kSegment - i) / peak;
   }
@@ -46,9 +46,23 @@ Normalization measure(const std::vector<float>& stereo, int64_t samples) {
   return {mean, std > 0.0 ? std : 1.0};
 }
 
+// Mono input: averages each stem's two channels into one, turning [stem][2][sample]
+// into [stem][sample]. Stem s is written where stems < s were read, so in place is safe.
+void downmix_in_place(std::vector<float>& stems, int64_t samples) {
+  for (int s = 0; s < kStemCount; ++s) {
+    const float* left = stems.data() + (s * kModelChannels) * samples;
+    const float* right = left + samples;
+    float* mono = stems.data() + s * samples;
+    for (int64_t i = 0; i < samples; ++i) mono[i] = 0.5f * (left[i] + right[i]);
+  }
+  stems.resize(kStemCount * samples);
+  stems.shrink_to_fit();
+}
+
 // The original separation at the model rate: chunk, run, blend, denormalize.
 // Returns kStemCount * channels * samples floats, [stem][channel][sample].
-std::vector<float> separate_at_model_rate(const ScnetModel& model, const float* audio, int channels, int64_t samples) {
+std::vector<float> separate_at_model_rate(const ScnetModel& model, const float* audio, int channels,
+                                          int64_t samples) {
   if (samples == 0) return {};
 
   // The model is stereo: mono input is duplicated on both channels.
@@ -108,37 +122,32 @@ std::vector<float> separate_at_model_rate(const ScnetModel& model, const float* 
       }
       auto prediction = model.infer(input);
       if (reconstructed.valid()) reconstructed.get();
-      reconstructed = std::async(std::launch::async, reconstruct_and_blend,
-                                 std::move(prediction), offset);
+      reconstructed = std::async(std::launch::async, reconstruct_and_blend, std::move(prediction), offset);
     }
     reconstructed.get();
   }
 
-  // Divide by the total weight and undo the normalization.
-  // For mono input, average the two output channels back into one.
-  std::vector<float> out(kStemCount * channels * samples);
-  for (int s = 0; s < kStemCount; ++s) {
-    const float* left = sum.data() + (s * kModelChannels) * samples;
-    const float* right = sum.data() + (s * kModelChannels + 1) * samples;
+  stereo = {};  // the normalized input isn't needed anymore
+
+  // Divide by the total weight and undo the normalization. Done in place: `sum`
+  // already has the [stem][channel][sample] layout, so it becomes the result.
+  for (int64_t signal = 0; signal < kStemCount * kModelChannels; ++signal) {
+    float* stem = sum.data() + signal * samples;
     for (int64_t i = 0; i < samples; ++i) {
-      const double l = left[i] / weight_sum[i] * norm.std + norm.mean;
-      const double r = right[i] / weight_sum[i] * norm.std + norm.mean;
-      if (channels == 1) {
-        out[s * samples + i] = static_cast<float>(0.5 * (l + r));
-      } else {
-        out[(s * 2) * samples + i] = static_cast<float>(l);
-        out[(s * 2 + 1) * samples + i] = static_cast<float>(r);
-      }
+      stem[i] = static_cast<float>(stem[i] / weight_sum[i] * norm.std + norm.mean);
     }
   }
-  return out;
+  if (channels == 1) downmix_in_place(sum, samples);
+  return sum;
 }
 
 // Resamples each of `signals` planar channels, one thread per channel.
-std::vector<float> resample_planar(const Resampler& resampler, const float* audio, int signals, int64_t frames) {
+std::vector<float> resample_planar(const Resampler& resampler, const float* audio, int signals,
+                                   int64_t frames) {
   const int64_t out_frames = resampler.output_length(frames);
   std::vector<float> out(signals * out_frames);
   std::vector<std::future<void>> jobs;
+  jobs.reserve(signals);
   for (int s = 0; s < signals; ++s) {
     jobs.push_back(std::async(std::launch::async, [&, s] {
       const std::vector<float> resampled = resampler.run(audio + s * frames, frames);
@@ -152,7 +161,8 @@ std::vector<float> resample_planar(const Resampler& resampler, const float* audi
 }  // namespace
 
 // Same path as the original inference: to 44.1 kHz, separate, back to the input rate.
-Separation separate_track(const ScnetModel& model, const float* audio, int channels, int64_t frames, int samplerate) {
+Separation separate_track(const ScnetModel& model, const float* audio, int channels, int64_t frames,
+                          int samplerate) {
   if (samplerate == kSamplerate) return {frames, separate_at_model_rate(model, audio, channels, frames)};
 
   const Resampler to_model(samplerate, kSamplerate);
@@ -162,7 +172,8 @@ Separation separate_track(const ScnetModel& model, const float* audio, int chann
   std::vector<float> input = resample_planar(to_model, audio, channels, frames);
   const std::vector<float> separated = separate_at_model_rate(model, input.data(), channels, model_frames);
   input = {};
-  return {back.output_length(model_frames), resample_planar(back, separated.data(), kStemCount * channels, model_frames)};
+  return {back.output_length(model_frames),
+          resample_planar(back, separated.data(), kStemCount * channels, model_frames)};
 }
 
 }  // namespace stems

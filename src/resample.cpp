@@ -9,11 +9,11 @@
 namespace stems {
 namespace {
 
-constexpr int kZeros = 24;            // julius default
-constexpr double kRolloff = 0.945;    // julius default
+constexpr int kZeros = 24;          // julius default
+constexpr double kRolloff = 0.945;  // julius default
 constexpr int kMinSamplerate = 8000;
 constexpr int kMaxSamplerate = 384000;
-constexpr int64_t kMaxTableSize = int64_t{1} << 22;  // floats, 16 MiB
+constexpr int64_t kMaxTableSize = 4 * 1024 * 1024;  // floats, 16 MiB
 
 constexpr double kPi = 3.14159265358979323846;
 

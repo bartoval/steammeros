@@ -50,16 +50,13 @@ ScnetModel::ScnetModel(const std::string& onnx_path, int threads) {
   // come in several lengths, so those blocks pile up: off, peak RAM per 20 s chunk drops
   // from ~9.4 to ~5.5 GiB at the same speed.
   options.DisableMemPattern();
+  // The arena rounds blocks up and never gives them back; plain malloc does, so the
+  // peak drops by another ~300 MB, again at the same speed.
+  options.DisableCpuMemArena();
   session_ = std::make_unique<Ort::Session>(ort_env(), onnx_path.c_str(), options);
 }
 
 ScnetModel::~ScnetModel() = default;
-
-void ScnetModel::separate(const float* audio, int64_t samples, float* out) const {
-  auto input = prepare(audio, samples);
-  auto output = infer(input);
-  reconstruct(output, out);
-}
 
 ScnetModel::Input ScnetModel::prepare(const float* audio, int64_t samples) const {
   // Pad each channel with zeros at the end, like F.pad(x, (0, padding)).
@@ -82,7 +79,8 @@ ScnetModel::Output ScnetModel::infer(Input& prepared) const {
   // Run the network: (1, 4, bins, frames) -> (1, 16, bins, frames).
   const auto memory = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
   const std::array<int64_t, 4> shape = {1, 2 * kModelChannels, kBins, frames};
-  Ort::Value input = Ort::Value::CreateTensor<float>(memory, prepared.spectrum.data(), prepared.spectrum.size(), shape.data(), shape.size());
+  Ort::Value input = Ort::Value::CreateTensor<float>(memory, prepared.spectrum.data(),
+                                                     prepared.spectrum.size(), shape.data(), shape.size());
   const char* input_names[] = {"spectrum"};
   const char* output_names[] = {"stems"};
   auto outputs = session_->Run(Ort::RunOptions{nullptr}, input_names, &input, 1, output_names, 1);
@@ -95,7 +93,8 @@ ScnetModel::Output ScnetModel::infer(Input& prepared) const {
   }
   const std::vector<int64_t> expected_shape = {1, 2 * kStemCount * kModelChannels, kBins, frames};
   if (output_info.GetShape() != expected_shape) {
-    throw Ort::Exception("incompatible model output: expected stems shape [1, 16, 2049, input_frames]", ORT_INVALID_GRAPH);
+    throw Ort::Exception("incompatible model output: expected stems shape [1, 16, 2049, input_frames]",
+                         ORT_INVALID_GRAPH);
   }
   return {prepared.samples, frames, std::move(outputs[0])};
 }

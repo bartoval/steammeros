@@ -69,10 +69,13 @@ stems_status guarded(stems_error* error, stems_status runtime_failure, Body&& bo
 void check_audio(const float* audio, int32_t channels, int64_t frames, int32_t samplerate) {
   if (channels != 1 && channels != 2) throw InvalidArgument("channels must be 1 or 2");
   if (frames < 0) throw InvalidArgument("frames must be >= 0");
-  if (frames > std::numeric_limits<int64_t>::max() / (stems::kStemCount * 2)) throw InvalidArgument("too many frames");
+  if (frames > std::numeric_limits<int64_t>::max() / (stems::kStemCount * 2)) {
+    throw InvalidArgument("too many frames");
+  }
   if (frames > 0 && !audio) throw InvalidArgument("audio is NULL");
   if (!stems::samplerate_supported(samplerate)) {
-    throw InvalidArgument("unsupported sample rate: use 8000-384000 Hz with a simple ratio to 44100 (e.g. 48000)");
+    throw InvalidArgument(
+        "unsupported sample rate: use 8000-384000 Hz with a simple ratio to 44100 (e.g. 48000)");
   }
 
   for (int64_t i = 0; i < channels * frames; ++i) {
@@ -88,7 +91,8 @@ uint32_t stems_api_version(void) { return STEMS_API_VERSION; }
 
 const char* stems_version_string(void) { return "stems " STEMS_VERSION; }
 
-stems_status stems_engine_create(const stems_engine_options* options, stems_engine** engine, stems_error* error) {
+stems_status stems_engine_create(const stems_engine_options* options, stems_engine** engine,
+                                 stems_error* error) {
   if (!engine) return fail(error, STEMS_ERR_INVALID_ARGUMENT, "engine is NULL");
   *engine = nullptr;
   if (!options || options->struct_size < sizeof(stems_engine_options)) {
@@ -136,7 +140,9 @@ int32_t stems_result_channels(const stems_result* result) { return result ? resu
 int64_t stems_result_frames(const stems_result* result) { return result ? result->frames : 0; }
 
 const float* stems_result_samples(const stems_result* result, int32_t stem, int32_t channel) {
-  if (!result || stem < 0 || stem >= stems::kStemCount || channel < 0 || channel >= result->channels) return nullptr;
+  if (!result || stem < 0 || stem >= stems::kStemCount || channel < 0 || channel >= result->channels) {
+    return nullptr;
+  }
   if (result->frames == 0) return nullptr;
   return result->samples.data() + (static_cast<int64_t>(stem) * result->channels + channel) * result->frames;
 }

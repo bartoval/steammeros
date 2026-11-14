@@ -35,9 +35,9 @@ typedef struct stems_engine stems_engine;
 typedef struct stems_result stems_result;
 
 typedef struct stems_engine_options {
-  uint32_t struct_size;     /* sizeof(stems_engine_options), lets us add fields later */
-  const char* model_path;   /* path to the .onnx model */
-  int32_t threads;          /* inference threads; 0 = automatic, 1 = sequential pipeline */
+  uint32_t struct_size;   /* sizeof(stems_engine_options), lets us add fields later */
+  const char* model_path; /* path to the .onnx model */
+  int32_t threads;        /* inference threads; 0 = automatic, 1 = sequential pipeline */
 } stems_engine_options;
 
 /* Returns STEMS_API_VERSION of the linked library. */
@@ -47,7 +47,8 @@ uint32_t stems_api_version(void);
 const char* stems_version_string(void);
 
 /* Loads the model. The engine is read-only afterwards and can be shared between threads. */
-stems_status stems_engine_create(const stems_engine_options* options, stems_engine** engine, stems_error* error);
+stems_status stems_engine_create(const stems_engine_options* options, stems_engine** engine,
+                                 stems_error* error);
 
 /* Frees the engine. Results created by it stay valid. NULL is a no-op. */
 void stems_engine_destroy(stems_engine* engine);

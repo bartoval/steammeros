@@ -1,7 +1,8 @@
 #include "spectrogram.h"
 
-#include <cmath>
+#include <algorithm>
 #include <complex>
+#include <functional>
 #include <vector>
 
 #include "pocketfft_hdronly.h"
@@ -9,7 +10,13 @@
 namespace stems {
 namespace {
 
+using Complex = std::complex<float>;
+
 constexpr int64_t kPad = kFftSize / 2;  // center=True pads half a window on each side
+
+// irfft divides by n_fft; normalized=True scales both ways by 1/sqrt(n_fft) = 1/64.
+constexpr float kScale = 1.0f / 64.0f;
+static_assert(kFftSize == 64 * 64);
 
 // torch "reflect" padding: index -1 maps to 1, n maps to n - 2 (the edge sample isn't repeated).
 int64_t reflect(int64_t i, int64_t n) {
@@ -18,8 +25,24 @@ int64_t reflect(int64_t i, int64_t n) {
   return i;
 }
 
+// pocketfft sees the frames as a 2-D array [frame][sample in frame]. These strides
+// (in bytes, one per axis) let it read and write our layouts directly, no copies:
+// frames overlapping by a hop in the signal, spectra as [bin][frame].
 pocketfft::shape_t frame_shape(int64_t frames) {
   return {static_cast<size_t>(frames), static_cast<size_t>(kFftSize)};
+}
+pocketfft::stride_t signal_strides() { return {sizeof(float) * kHop, sizeof(float)}; }
+pocketfft::stride_t row_strides() { return {sizeof(float) * kFftSize, sizeof(float)}; }
+pocketfft::stride_t spectrum_strides(int64_t frames) {
+  return {sizeof(Complex), static_cast<ptrdiff_t>(sizeof(Complex) * frames)};
+}
+
+// How many frames overlap sample `i` of the padded signal: 4 in the middle,
+// fewer at the edges. torch divides by this after overlap-add (rectangular window).
+int64_t frames_covering(int64_t i, int64_t frames) {
+  const int64_t first = i < kFftSize ? 0 : (i - kFftSize) / kHop + 1;
+  const int64_t last = std::min(i / kHop, frames - 1);
+  return last - first + 1;
 }
 
 }  // namespace
@@ -27,62 +50,41 @@ pocketfft::shape_t frame_shape(int64_t frames) {
 void stft(const float* audio, int64_t samples, float* real, float* imag) {
   const int64_t frames = stft_frames(samples);
 
-  // Cut the padded signal into overlapping frames, one row each, then FFT all rows at once.
-  std::vector<float> rows(frames * kFftSize);
-  for (int64_t f = 0; f < frames; ++f) {
-    for (int64_t k = 0; k < kFftSize; ++k) {
-      rows[f * kFftSize + k] = audio[reflect(f * kHop + k - kPad, samples)];
-    }
+  // Reflect-pad, then FFT every frame straight out of the padded signal.
+  std::vector<float> padded(samples + 2 * kPad);
+  for (int64_t i = 0; i < static_cast<int64_t>(padded.size()); ++i) {
+    padded[i] = audio[reflect(i - kPad, samples)];
   }
+  std::vector<Complex> spectrum(kBins * frames);
+  pocketfft::r2c(frame_shape(frames), signal_strides(), spectrum_strides(frames), /*axis=*/1,
+                 pocketfft::FORWARD, padded.data(), spectrum.data(), kScale);
 
-  std::vector<std::complex<float>> spectrum(frames * kBins);
-  const float scale = 1.0f / std::sqrt(static_cast<float>(kFftSize));  // normalized=True
-  pocketfft::r2c(frame_shape(frames),
-                 {sizeof(float) * kFftSize, sizeof(float)},
-                 {sizeof(std::complex<float>) * kBins, sizeof(std::complex<float>)},
-                 /*axis=*/1, pocketfft::FORWARD, rows.data(), spectrum.data(), scale);
-
-  // [frame][bin] complex -> [bin][frame] real/imag planes.
-  for (int64_t f = 0; f < frames; ++f) {
-    for (int64_t b = 0; b < kBins; ++b) {
-      real[b * frames + f] = spectrum[f * kBins + b].real();
-      imag[b * frames + f] = spectrum[f * kBins + b].imag();
-    }
+  for (int64_t i = 0; i < kBins * frames; ++i) {
+    real[i] = spectrum[i].real();
+    imag[i] = spectrum[i].imag();
   }
 }
 
 void istft(const float* real, const float* imag, int64_t frames, float* audio) {
-  std::vector<std::complex<float>> spectrum(frames * kBins);
-  for (int64_t f = 0; f < frames; ++f) {
-    for (int64_t b = 0; b < kBins; ++b) {
-      spectrum[f * kBins + b] = {real[b * frames + f], imag[b * frames + f]};
-    }
-  }
+  std::vector<Complex> spectrum(kBins * frames);
+  for (int64_t i = 0; i < kBins * frames; ++i) spectrum[i] = {real[i], imag[i]};
 
-  // irfft divides by n_fft; normalized=True multiplies back by sqrt(n_fft).
   std::vector<float> rows(frames * kFftSize);
-  const float scale = 1.0f / std::sqrt(static_cast<float>(kFftSize));
-  pocketfft::c2r(frame_shape(frames),
-                 {sizeof(std::complex<float>) * kBins, sizeof(std::complex<float>)},
-                 {sizeof(float) * kFftSize, sizeof(float)},
-                 /*axis=*/1, pocketfft::BACKWARD, spectrum.data(), rows.data(), scale);
+  pocketfft::c2r(frame_shape(frames), spectrum_strides(frames), row_strides(), /*axis=*/1,
+                 pocketfft::BACKWARD, spectrum.data(), rows.data(), kScale);
 
-  // Overlap-add. With a rectangular window, torch divides each sample by how many
-  // frames cover it (4 in the middle, fewer near the edges).
-  const int64_t padded = kFftSize + kHop * (frames - 1);
-  std::vector<float> sum(padded, 0.0f);
-  std::vector<float> count(padded, 0.0f);
+  // Overlap-add the frames back into one signal.
+  std::vector<float> sum(kFftSize + kHop * (frames - 1), 0.0f);
   for (int64_t f = 0; f < frames; ++f) {
-    for (int64_t k = 0; k < kFftSize; ++k) {
-      sum[f * kHop + k] += rows[f * kFftSize + k];
-      count[f * kHop + k] += 1.0f;
-    }
+    const float* row = rows.data() + f * kFftSize;
+    float* target = sum.data() + f * kHop;
+    std::transform(row, row + kFftSize, target, target, std::plus<>());
   }
 
-  // Drop the center=True padding again.
+  // Normalize by frame coverage and drop the center=True padding.
   const int64_t samples = kHop * (frames - 1);
   for (int64_t i = 0; i < samples; ++i) {
-    audio[i] = sum[i + kPad] / count[i + kPad];
+    audio[i] = sum[i + kPad] / static_cast<float>(frames_covering(i + kPad, frames));
   }
 }
 

@@ -16,11 +16,13 @@ inline constexpr int kStemCount = 4;
 inline constexpr std::array<const char*, kStemCount> kStemNames = {"drums", "bass", "other", "vocals"};
 
 // SCNet on one chunk of stereo audio: the native version of SCNet.forward().
-// Loaded once, then read-only: separate() can run from several threads at once.
+// Three stages, so the caller can overlap them across chunks: prepare() (STFT),
+// infer() (the network), reconstruct() (iSTFT). Loaded once, then read-only:
+// every stage can run from several threads at once.
 class ScnetModel {
  public:
-  // Internal, owning buffers passed between the three pipeline stages. Keeping
-  // the ORT output alive lets reconstruction overlap the next Run without a copy.
+  // Owning buffers passed between the stages. Keeping the ORT output alive lets
+  // reconstruction overlap the next Run without a copy.
   struct Input {
     int64_t samples;
     int64_t frames;
@@ -36,11 +38,9 @@ class ScnetModel {
   ~ScnetModel();
 
   // `audio`: 2 planar channels of `samples` each (already normalized by the caller).
-  // `out`:   kStemCount * 2 * samples floats, [stem][channel][sample].
-  void separate(const float* audio, int64_t samples, float* out) const;
-
   Input prepare(const float* audio, int64_t samples) const;
   Output infer(Input& input) const;
+  // `out`: kStemCount * 2 * samples floats, [stem][channel][sample].
   void reconstruct(const Output& output, float* out) const;
   bool pipeline_enabled() const { return fft_threads_ > 1; }
 

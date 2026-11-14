@@ -31,7 +31,7 @@ class Resampler {
     int64_t last = 0;
   };
 
-  int64_t from_ = 1;   // rates divided by their gcd, e.g. 48000 -> 44100 is 160 -> 147
+  int64_t from_ = 1;  // rates divided by their gcd, e.g. 48000 -> 44100 is 160 -> 147
   int64_t to_ = 1;
   int64_t width_ = 0;  // samples of context on each side
   std::vector<Phase> phases_;

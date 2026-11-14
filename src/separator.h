@@ -21,6 +21,7 @@ struct Separation {
   int64_t frames = 0;
   std::vector<float> samples;
 };
-Separation separate_track(const ScnetModel& model, const float* audio, int channels, int64_t frames, int samplerate);
+Separation separate_track(const ScnetModel& model, const float* audio, int channels, int64_t frames,
+                          int samplerate);
 
 }  // namespace stems
