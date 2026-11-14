@@ -11,7 +11,7 @@ untested. The API may still change.
 ## Quick start
 
 ```sh
-go get github.com/bartoval/steammeros
+go get github.com/bartoval/steammeros/stems
 ```
 
 That compiles everything; you need Go 1.26 and a C++20 compiler (GCC or Clang). At run
@@ -50,7 +50,7 @@ curl -X DELETE localhost:8080/jobs/1                   # cancels it if running, 
 ## Go
 
 ```go
-import stems "github.com/bartoval/steammeros"
+import "github.com/bartoval/steammeros/stems"
 
 engine, err := stems.NewEngine(stems.Options{ModelPath: "models/scnet-large/scnet-large.onnx"})
 if err != nil { ... }
@@ -100,7 +100,7 @@ PKG_CONFIG_PATH=$PWD/build/pkgconfig go build -tags stems_static ./...
 After rebuilding the archive, pass `-a` to `go build`/`go test`. Go doesn't notice
 changes inside libraries it links through pkg-config. The same CMake build also produces
 `libstems.a` with `pkgconfig/stems.pc`, for C and C++ programs using the C API in
-`stems.h`. That API is the same as in Go: `stems_separate` plus an optional `stems_job`
+`stems/stems.h`. That API is the same as in Go: `stems_separate` plus an optional `stems_job`
 to read progress and cancel from another thread.
 
 ## How it works

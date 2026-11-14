@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const testModel = "models/scnet-large/scnet-large.onnx"
+const testModel = "../models/scnet-large/scnet-large.onnx"
 
 func TestStemNamesConcurrentClose(t *testing.T) {
 	engine, err := NewEngine(Options{ModelPath: "testdata/wrong-output-shape.onnx", Threads: 1})

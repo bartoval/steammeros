@@ -17,8 +17,8 @@ import (
 	"strings"
 	"time"
 
-	stems "github.com/bartoval/steammeros"
 	"github.com/bartoval/steammeros/internal/audiofile"
+	"github.com/bartoval/steammeros/stems"
 )
 
 func main() {

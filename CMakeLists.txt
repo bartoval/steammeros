@@ -7,7 +7,7 @@
 #   libonnxruntime-static.a + pkgconfig/onnxruntime-static.pc  Go with -tags stems_static
 cmake_minimum_required(VERSION 3.24)
 
-file(STRINGS stems.h STEMS_VERSION_LINE REGEX "^#define STEMS_VERSION ")
+file(STRINGS stems/stems.h STEMS_VERSION_LINE REGEX "^#define STEMS_VERSION ")
 string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]+" STEMS_VERSION "${STEMS_VERSION_LINE}")
 project(stems VERSION ${STEMS_VERSION} LANGUAGES CXX)
 
@@ -27,11 +27,12 @@ endif()
 file(GLOB_RECURSE ORT_ARCHIVES ${ORT_BUILD}/*.a)
 list(FILTER ORT_ARCHIVES EXCLUDE REGEX "/CMakeFiles/|libprotoc|libgtest|libgmock")
 
-# Our code. The ONNX Runtime and pocketfft headers are in external/.
+# Our code, in stems/. The ONNX Runtime and pocketfft headers are in stems/external/.
 find_package(Threads REQUIRED)
-add_library(stems_core STATIC api.cpp ort.cpp resample.cpp scnet.cpp separator.cpp spectrogram.cpp)
-target_include_directories(stems_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_include_directories(stems_core PRIVATE external/onnxruntime external/pocketfft)
+add_library(stems_core STATIC
+  stems/api.cpp stems/ort.cpp stems/resample.cpp stems/scnet.cpp stems/separator.cpp stems/spectrogram.cpp)
+target_include_directories(stems_core PUBLIC stems)
+target_include_directories(stems_core PRIVATE stems/external/onnxruntime stems/external/pocketfft)
 target_compile_options(stems_core PRIVATE -Wall -Wextra)
 target_link_libraries(stems_core PRIVATE Threads::Threads)
 
@@ -61,7 +62,7 @@ add_dependencies(stems stems_core)
 file(GENERATE OUTPUT pkgconfig/stems.pc CONTENT "Name: stems
 Description: In-process music source separation, with ONNX Runtime linked in
 Version: ${PROJECT_VERSION}
-Cflags: -I${CMAKE_CURRENT_SOURCE_DIR}
+Cflags: -I${CMAKE_CURRENT_SOURCE_DIR}/stems
 Libs: ${STEMS_ARCHIVE} -lstdc++ -lm -pthread
 ")
 file(GENERATE OUTPUT pkgconfig/onnxruntime-static.pc CONTENT "Name: onnxruntime-static

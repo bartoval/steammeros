@@ -6,4 +6,4 @@ tools/*.py linguist-vendored linguist-detectable=false
 # The native C++ core remains part of the library, outside the language statistics.
 *.cpp linguist-detectable=false
 *.h linguist-detectable=false
-external/** linguist-vendored
+stems/external/** linguist-vendored

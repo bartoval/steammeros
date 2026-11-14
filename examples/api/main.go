@@ -25,8 +25,8 @@ import (
 	"strconv"
 	"sync"
 
-	stems "github.com/bartoval/steammeros"
 	"github.com/bartoval/steammeros/internal/audiofile"
+	"github.com/bartoval/steammeros/stems"
 )
 
 // One uploaded song. The exported fields are what GET /jobs/{id} returns.

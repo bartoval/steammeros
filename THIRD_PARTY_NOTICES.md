@@ -5,9 +5,9 @@ Code and models from other projects that end up in this library or its builds.
 | Component | Used as | License |
 |-|-|-|
 | [SCNet](https://github.com/starrytong/SCNet), Copyright (c) 2024 starrytong | model weights (exported to ONNX); inference steps ported to C++ | MIT |
-| [julius](https://github.com/adefossez/julius), Copyright 2020 Alexandre Défossez | `resample_frac` ported to `resample.cpp` | MIT |
-| [ONNX Runtime](https://github.com/microsoft/onnxruntime), Copyright (c) Microsoft Corporation | API headers in `external/onnxruntime/`; library loaded at run time, or built by `tools/build_ort.sh` and linked statically | MIT |
-| [pocketfft](https://gitlab.mpcdf.mpg.de/mtr/pocketfft), Copyright (C) 2010-2018 Max-Planck-Society | header in `external/pocketfft/`, compiled into the library | BSD-3-Clause |
+| [julius](https://github.com/adefossez/julius), Copyright 2020 Alexandre Défossez | `resample_frac` ported to `stems/resample.cpp` | MIT |
+| [ONNX Runtime](https://github.com/microsoft/onnxruntime), Copyright (c) Microsoft Corporation | API headers in `stems/external/onnxruntime/`; library loaded at run time, or built by `tools/build_ort.sh` and linked statically | MIT |
+| [pocketfft](https://gitlab.mpcdf.mpg.de/mtr/pocketfft), Copyright (C) 2010-2018 Max-Planck-Society | header in `stems/external/pocketfft/`, compiled into the library | BSD-3-Clause |
 
 ONNX Runtime bundles further libraries (abseil, protobuf, re2, Eigen, ...). Binaries that
 include or ship it must also ship its `ThirdPartyNotices.txt`, found in the ONNX Runtime
