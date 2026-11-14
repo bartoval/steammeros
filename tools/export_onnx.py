@@ -1,7 +1,8 @@
 """Export the SCNet network (spectrum in, spectrum out) to ONNX and check it against PyTorch.
 
-    python -I tools/export_onnx.py      # writes models/scnet-large/scnet-large.onnx
+python -I tools/export_onnx.py      # writes models/scnet-large/scnet-large.onnx
 """
+
 import argparse
 import json
 import math
@@ -26,7 +27,6 @@ import torch
 import torch.nn.functional as F
 import yaml
 from ml_collections import ConfigDict
-
 from scnet.SCNet import FusionLayer, SCNet
 from scnet.separation import FeatureConversion
 from scnet.utils import load_model
@@ -47,7 +47,6 @@ OPSET = 20
 # Output: (batch, 16, 2049, frames) channels = 4 * source + 2 * channel + (0 re, 1 im),
 #         sources in model order: drums, bass, other, vocals
 class SpectrumNet(torch.nn.Module):
-
     def __init__(self, model: SCNet, stable_normalization: bool = False):
         super().__init__()
         self.model = model
@@ -85,7 +84,9 @@ def precise_mean_std(x):
     count = x.shape[1] * x.shape[2] * x.shape[3]
     mean = x.mean(dim=3, keepdim=True).mean(dim=2, keepdim=True).mean(dim=1, keepdim=True)
     centered = x - mean
-    squares = (centered * centered).mean(dim=3, keepdim=True).mean(dim=2, keepdim=True).mean(dim=1, keepdim=True)
+    squares = (
+        (centered * centered).mean(dim=3, keepdim=True).mean(dim=2, keepdim=True).mean(dim=1, keepdim=True)
+    )
     std = torch.sqrt(squares * count / (count - 1))
     return mean, std
 
@@ -216,7 +217,7 @@ def spectrum_of(model: SCNet, audio: torch.Tensor) -> torch.Tensor:
 def snr(estimate, reference) -> float:
     reference = reference.astype(np.float64)
     error = estimate.astype(np.float64) - reference
-    return float(10 * np.log10(np.sum(reference ** 2) / np.sum(error ** 2)))
+    return float(10 * np.log10(np.sum(reference**2) / np.sum(error**2)))
 
 
 def check_runtime_version() -> str:
@@ -234,7 +235,9 @@ def check_runtime_version() -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--threads", type=int, default=8)
     args = parser.parse_args()
     if args.threads <= 0:
@@ -265,8 +268,13 @@ def main() -> int:
         example = spectrum_of(model, torch.randn(2, 44100 * 3) * 0.1)
         frames = torch.export.Dim("frames", min=8, max=4096)
         torch.onnx.export(
-            net, (example,), OUTPUT, opset_version=OPSET, dynamo=True,
-            input_names=["spectrum"], output_names=["stems"],
+            net,
+            (example,),
+            OUTPUT,
+            opset_version=OPSET,
+            dynamo=True,
+            input_names=["spectrum"],
+            output_names=["stems"],
             dynamic_shapes={"x": {3: frames}},
             external_data=False,
         )
@@ -282,15 +290,22 @@ def main() -> int:
         sys.exit("invalid exported output: shape mismatch or non-finite values")
     actual_snr = snr(actual, expected)
     report = {
-        "torch": torch.__version__, "onnxruntime": ort.__version__, "threads": args.threads,
-        "opset": OPSET, "input": str(TEST_AUDIO), "audio_frames": audio.shape[-1],
-        "output_shape": list(actual.shape), "pytorch_rewrite_snr_db": rewrite_snr,
+        "torch": torch.__version__,
+        "onnxruntime": ort.__version__,
+        "threads": args.threads,
+        "opset": OPSET,
+        "input": str(TEST_AUDIO),
+        "audio_frames": audio.shape[-1],
+        "output_shape": list(actual.shape),
+        "pytorch_rewrite_snr_db": rewrite_snr,
         "ort_snr_db": actual_snr,
         "max_abs_error": float(np.abs(actual.astype(np.float64) - expected.astype(np.float64)).max()),
     }
     OUTPUT.with_suffix(".export.json").write_text(json.dumps(report, indent=2, allow_nan=False))
-    print(f"ONNX Runtime vs original PyTorch: SNR {actual_snr:.1f} dB "
-          f"({time.perf_counter() - start:.1f} s for 20 s of audio)")
+    print(
+        f"ONNX Runtime vs original PyTorch: SNR {actual_snr:.1f} dB "
+        f"({time.perf_counter() - start:.1f} s for 20 s of audio)"
+    )
     return 0
 
 

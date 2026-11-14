@@ -1,7 +1,8 @@
 """How close a results folder is to the reference (e.g. native port vs original PyTorch).
 
-    python -I tools/parity.py data/results/native data/results/excerpts-deterministic
+python -I tools/parity.py data/results/native data/results/excerpts-deterministic
 """
+
 import argparse
 import sys
 from pathlib import Path
@@ -10,8 +11,8 @@ import numpy as np
 import soundfile as sf
 
 STEMS = ["drums", "bass", "other", "vocals"]
-SILENT_RMS = 1e-4       # reference quieter than this (-80 dBFS) counts as near-silent
-MIN_SNR_DB = 50.0       # whole stem
+SILENT_RMS = 1e-4  # reference quieter than this (-80 dBFS) counts as near-silent
+MIN_SNR_DB = 50.0  # whole stem
 MIN_WINDOW_SNR_DB = 40.0  # worst 1 s window: catches local glitches, e.g. at chunk boundaries
 MAX_SILENT_ERROR = 1e-4
 
@@ -21,20 +22,20 @@ def snr(reference: np.ndarray, estimate: np.ndarray) -> float:
     error = np.sum((estimate - reference) ** 2)
     if error == 0:
         return float("inf")
-    return float(10 * np.log10(np.sum(reference ** 2) / error))
+    return float(10 * np.log10(np.sum(reference**2) / error))
 
 
 def rms(x: np.ndarray) -> float:
-    return float(np.sqrt(np.mean(x ** 2))) if x.size else 0.0
+    return float(np.sqrt(np.mean(x**2))) if x.size else 0.0
 
 
 # Worst SNR over 1 s windows, skipping windows where the reference is near-silent.
 def worst_window_snr(reference: np.ndarray, estimate: np.ndarray, samplerate: int) -> float:
     worst = float("inf")
     for start in range(0, len(reference), samplerate):
-        ref = reference[start:start + samplerate]
+        ref = reference[start : start + samplerate]
         if rms(ref) >= SILENT_RMS:
-            worst = min(worst, snr(ref, estimate[start:start + samplerate]))
+            worst = min(worst, snr(ref, estimate[start : start + samplerate]))
     return worst
 
 
@@ -66,7 +67,9 @@ def compare_files(reference_path: Path, estimate_path: Path) -> tuple[bool, str]
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("estimates", type=Path, help="folder with <item>/<stem>.wav to check")
     parser.add_argument("reference", type=Path, help="reference folder, same layout")
     args = parser.parse_args()

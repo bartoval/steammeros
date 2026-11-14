@@ -6,6 +6,7 @@ Writes small stage-specific ONNX graphs and report.json, without replacing the
 production model or references. CPU FP32; compares original and rewritten
 GroupNorm, with ORT graph optimizations disabled and enabled.
 """
+
 import argparse
 import copy
 import hashlib
@@ -17,7 +18,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import export_onnx as export
-
 import numpy as np
 import onnxruntime as ort
 import soundfile as sf
@@ -45,7 +45,7 @@ def metrics(actual, expected):
     if not np.isfinite(actual).all() or not np.isfinite(expected).all():
         return {"shape_matches": True, "finite": False}
     difference = actual.astype(np.float64) - expected.astype(np.float64)
-    error = float(np.sum(difference ** 2))
+    error = float(np.sum(difference**2))
     signal = float(np.sum(expected.astype(np.float64) ** 2))
     return {
         "shape_matches": True,
@@ -53,16 +53,20 @@ def metrics(actual, expected):
         "exact": error == 0,
         "snr_db": float(10 * np.log10(signal / error)) if error > 0 and signal > 0 else None,
         "max_abs_error": float(np.max(np.abs(difference))),
-        "rmse": float(np.sqrt(np.mean(difference ** 2))),
+        "rmse": float(np.sqrt(np.mean(difference**2))),
     }
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--input", type=Path, default=export.TEST_AUDIO)
     parser.add_argument("--seconds", type=int, default=10)
     parser.add_argument("--threads", type=int, default=8)
-    parser.add_argument("--stages", nargs="+", choices=["norm0", "lstm0", "linear0", "norm1", "lstm1", "linear1", "block"])
+    parser.add_argument(
+        "--stages", nargs="+", choices=["norm0", "lstm0", "linear0", "norm1", "lstm1", "linear1", "block"]
+    )
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     if args.seconds <= 0 or args.threads <= 0:
@@ -98,6 +102,7 @@ def main():
         def hook(module, inputs, result):
             output = result[0] if isinstance(result, tuple) else result
             captured[name] = (inputs[0].detach().clone(), output.detach().numpy().copy())
+
         return hook
 
     hooks = [module.register_forward_hook(capture(name)) for name, module in stages.items()]
@@ -139,12 +144,20 @@ def main():
             with context, torch.no_grad():
                 rewritten = metrics(wrapper(stage_input).numpy(), expected)
                 torch.onnx.export(
-                    wrapper, (stage_input,), path, opset_version=export.OPSET,
-                    dynamo=True, verbose=False, external_data=False,
-                    input_names=["input"], output_names=["output"],
+                    wrapper,
+                    (stage_input,),
+                    path,
+                    opset_version=export.OPSET,
+                    dynamo=True,
+                    verbose=False,
+                    external_data=False,
+                    input_names=["input"],
+                    output_names=["output"],
                 )
-            for label, level in [("disabled", ort.GraphOptimizationLevel.ORT_DISABLE_ALL),
-                                 ("all", ort.GraphOptimizationLevel.ORT_ENABLE_ALL)]:
+            for label, level in [
+                ("disabled", ort.GraphOptimizationLevel.ORT_DISABLE_ALL),
+                ("all", ort.GraphOptimizationLevel.ORT_ENABLE_ALL),
+            ]:
                 options = ort.SessionOptions()
                 options.intra_op_num_threads = args.threads
                 options.inter_op_num_threads = 1
@@ -152,10 +165,16 @@ def main():
                 session = ort.InferenceSession(str(path), options, providers=["CPUExecutionProvider"])
                 actual = session.run(["output"], {"input": stage_input.numpy()})[0]
                 result = metrics(actual, expected)
-                report["items"].append({
-                    "stage": name, "variant": variant, "optimizations": label,
-                    "shape": list(expected.shape), "pytorch_rewrite": rewritten, **result,
-                })
+                report["items"].append(
+                    {
+                        "stage": name,
+                        "variant": variant,
+                        "optimizations": label,
+                        "shape": list(expected.shape),
+                        "pytorch_rewrite": rewritten,
+                        **result,
+                    }
+                )
                 (args.out / "report.json").write_text(json.dumps(report, indent=2, allow_nan=False))
                 print(f"{name:8s} {variant:9s} {label:8s} {result}", flush=True)
                 del session

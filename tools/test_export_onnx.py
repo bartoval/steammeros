@@ -3,7 +3,6 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import export_onnx as export
-
 import onnxruntime as ort
 import torch
 
@@ -23,8 +22,15 @@ class GroupNormPrecisionTest(unittest.TestCase):
             path = Path(directory) / "group-norm.onnx"
             with export.export_rewrites(norm), torch.no_grad():
                 torch.onnx.export(
-                    norm, (x,), path, opset_version=export.OPSET, dynamo=True,
-                    verbose=False, external_data=False, input_names=["input"], output_names=["output"],
+                    norm,
+                    (x,),
+                    path,
+                    opset_version=export.OPSET,
+                    dynamo=True,
+                    verbose=False,
+                    external_data=False,
+                    input_names=["input"],
+                    output_names=["output"],
                 )
             options = ort.SessionOptions()
             options.intra_op_num_threads = 2

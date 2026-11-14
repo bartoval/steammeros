@@ -4,6 +4,7 @@
     python -I tools/sdr.py data/results/excerpts-original data/excerpts \\
         --baseline data/results/excerpts-deterministic
 """
+
 import argparse
 import json
 import sys
@@ -13,20 +14,20 @@ import numpy as np
 import soundfile as sf
 
 STEMS = ["drums", "bass", "other", "vocals"]
-DELTA = 1e-7            # MDX'21 SDR definition
-SILENT_RMS = 1e-4       # true source quieter than this (-80 dBFS): SDR is meaningless, skip it
+DELTA = 1e-7  # MDX'21 SDR definition
+SILENT_RMS = 1e-4  # true source quieter than this (-80 dBFS): SDR is meaningless, skip it
 
 
 # SDR as in the MDX'21 challenge: energy of the true source over energy of the error, in dB.
 # One number for the whole stereo signal. Higher is better; +1 dB is a clearly audible step.
 def sdr(true: np.ndarray, estimate: np.ndarray) -> float:
-    signal = np.sum(true ** 2) + DELTA
+    signal = np.sum(true**2) + DELTA
     error = np.sum((true - estimate) ** 2) + DELTA
     return float(10 * np.log10(signal / error))
 
 
 def rms(x: np.ndarray) -> float:
-    return float(np.sqrt(np.mean(x ** 2)))
+    return float(np.sqrt(np.mean(x**2)))
 
 
 # SDR for every stem of every item found in both folders.
@@ -78,7 +79,9 @@ def print_table(results: dict, baseline: dict | None) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("estimates", type=Path, help="folder with <item>/{drums,bass,other,vocals}.wav")
     parser.add_argument("sources", type=Path, help="folder with the true sources, same layout")
     parser.add_argument("--baseline", type=Path, help="another results folder: print the SDR difference")

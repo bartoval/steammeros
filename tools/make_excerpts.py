@@ -1,7 +1,8 @@
 """Pick 25 s test excerpts from the MUSDB18-HQ tracks and cut them out (mixture + true stems).
 
-    python -I tools/make_excerpts.py            # reads data/musdb18hq/test, writes data/excerpts
+python -I tools/make_excerpts.py            # reads data/musdb18hq/test, writes data/excerpts
 """
+
 import json
 import sys
 from pathlib import Path
@@ -15,10 +16,10 @@ OUT_DIR = ROOT / "data" / "excerpts"
 
 STEMS = ["drums", "bass", "other", "vocals"]
 SAMPLERATE = 44100
-BLOCK = 4410            # 0.1 s: features are measured per block, then averaged per window
-WINDOW_BLOCKS = 250     # 25 s excerpts
-HOP_BLOCKS = 25         # candidate windows start every 2.5 s
-HF_CUTOFF_HZ = 6000     # "cymbal" energy = drums energy above this
+BLOCK = 4410  # 0.1 s: features are measured per block, then averaged per window
+WINDOW_BLOCKS = 250  # 25 s excerpts
+HOP_BLOCKS = 25  # candidate windows start every 2.5 s
+HF_CUTOFF_HZ = 6000  # "cymbal" energy = drums energy above this
 EPS = 1e-12
 
 # Three full tracks for timing/memory tests: short, typical and long.
@@ -100,7 +101,9 @@ def category_scores(win: dict) -> dict:
         # quietest passage that is not digital silence
         "near_silent": np.where(db(mix) > -80, -db(mix), no),
         # music playing but (almost) no vocals: does the vocals stem stay empty?
-        "instrumental": np.where(rel["vocals"] < -40, np.minimum.reduce([rel[s] for s in ["drums", "bass", "other"]]), no),
+        "instrumental": np.where(
+            rel["vocals"] < -40, np.minimum.reduce([rel[s] for s in ["drums", "bass", "other"]]), no
+        ),
         # drums dominate the mix
         "drums_forward": rel["drums"],
         # "other" (guitars, keys, strings...) dominates the mix
@@ -131,7 +134,11 @@ def choose_excerpts(scores_by_track: dict, windows_by_track: dict) -> list:
         picks.append((category, track, best, float(scores_by_track[track]["dense_mix"][best])))
 
     def tracks_eligible(category):
-        return sum(np.isfinite(scores[category]).any() for track, scores in scores_by_track.items() if track not in used)
+        return sum(
+            np.isfinite(scores[category]).any()
+            for track, scores in scores_by_track.items()
+            if track not in used
+        )
 
     categories = list(scores_by_track[next(iter(scores_by_track))])
     for category in sorted(categories, key=tracks_eligible):
@@ -150,15 +157,19 @@ def choose_excerpts(scores_by_track: dict, windows_by_track: dict) -> list:
     excerpts = []
     for number, (category, track, index, score) in enumerate(picks, start=1):
         start = int(windows_by_track[track]["start_block"][index]) * BLOCK
-        excerpts.append({
-            "id": f"{number:02d}-{category}",
-            "category": category,
-            "track": track,
-            "start_s": start / SAMPLERATE,
-            "length_s": WINDOW_BLOCKS * BLOCK / SAMPLERATE,
-            "score": round(score, 2),
-            "basis": "track choice, genre unverified" if category in BY_TRACK else "measured on true stems",
-        })
+        excerpts.append(
+            {
+                "id": f"{number:02d}-{category}",
+                "category": category,
+                "track": track,
+                "start_s": start / SAMPLERATE,
+                "length_s": WINDOW_BLOCKS * BLOCK / SAMPLERATE,
+                "score": round(score, 2),
+                "basis": "track choice, genre unverified"
+                if category in BY_TRACK
+                else "measured on true stems",
+            }
+        )
     return excerpts
 
 
@@ -171,7 +182,9 @@ def cut_excerpt(excerpt: dict) -> None:
     frames = round(excerpt["length_s"] * SAMPLERATE)
 
     for name in ["mixture"] + STEMS:
-        audio, _ = sf.read(TRACKS_DIR / excerpt["track"] / f"{name}.wav", start=start, frames=frames, dtype="int16")
+        audio, _ = sf.read(
+            TRACKS_DIR / excerpt["track"] / f"{name}.wav", start=start, frames=frames, dtype="int16"
+        )
         sf.write(out / f"{name}.wav", audio, SAMPLERATE, subtype="PCM_16")
 
 
@@ -187,7 +200,9 @@ def main() -> int:
     excerpts = choose_excerpts(scores_by_track, windows_by_track)
     for excerpt in excerpts:
         cut_excerpt(excerpt)
-        print(f"{excerpt['id']:28s} {excerpt['track']:45s} @ {excerpt['start_s']:6.1f}s  score {excerpt['score']}")
+        print(
+            f"{excerpt['id']:28s} {excerpt['track']:45s} @ {excerpt['start_s']:6.1f}s  score {excerpt['score']}"
+        )
 
     manifest = {"excerpts": excerpts, "full_tracks": FULL_TRACKS}
     (OUT_DIR / "excerpts.json").write_text(json.dumps(manifest, indent=1))

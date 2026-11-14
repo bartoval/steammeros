@@ -3,6 +3,7 @@
     python -I tools/run_reference.py --out data/results/reference \\
         data/musdb18hq/test/*/mixture.wav
 """
+
 import argparse
 import functools
 import hashlib
@@ -22,12 +23,11 @@ MODELS_DIR = ROOT / "models"
 sys.path.insert(0, str(ROOT / "third_party" / "SCNet"))
 
 import numpy as np
+import scnet.inference as original
 import soundfile as sf
 import torch
 import yaml
 from ml_collections import ConfigDict
-
-import scnet.inference as original
 from scnet.SCNet import SCNet
 
 
@@ -93,7 +93,9 @@ def save_stems(stems: dict, samplerate: int, out_dir: Path) -> None:
 # --mode deterministic: no random time shift, same input -> same output (use this for parity).
 # --mode original:      random shift like the original code, with a fixed seed.
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("inputs", nargs="+", type=Path, help="input WAV files")
     parser.add_argument("--out", required=True, type=Path, help="output directory")
     parser.add_argument("--mode", choices=["deterministic", "original"], default="deterministic")
