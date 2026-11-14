@@ -1,3 +1,5 @@
+// Port of julius.resample_frac, Copyright 2020 Alexandre Défossez, MIT License
+// (see THIRD_PARTY_NOTICES.md).
 #include "resample.h"
 
 #include <algorithm>
