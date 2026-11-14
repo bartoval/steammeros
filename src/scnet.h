@@ -4,10 +4,9 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
-namespace Ort {
-struct Session;
-}
+#include "onnxruntime_cxx_api.h"
 
 namespace stems {
 
@@ -20,6 +19,19 @@ inline constexpr std::array<const char*, kStemCount> kStemNames = {"drums", "bas
 // Loaded once, then read-only: separate() can run from several threads at once.
 class ScnetModel {
  public:
+  // Internal, owning buffers passed between the three pipeline stages. Keeping
+  // the ORT output alive lets reconstruction overlap the next Run without a copy.
+  struct Input {
+    int64_t samples;
+    int64_t frames;
+    std::vector<float> spectrum;
+  };
+  struct Output {
+    int64_t samples;
+    int64_t frames;
+    Ort::Value spectrum;
+  };
+
   ScnetModel(const std::string& onnx_path, int threads);
   ~ScnetModel();
 
@@ -27,8 +39,14 @@ class ScnetModel {
   // `out`:   kStemCount * 2 * samples floats, [stem][channel][sample].
   void separate(const float* audio, int64_t samples, float* out) const;
 
+  Input prepare(const float* audio, int64_t samples) const;
+  Output infer(Input& input) const;
+  void reconstruct(const Output& output, float* out) const;
+  bool pipeline_enabled() const { return fft_threads_ > 1; }
+
  private:
   std::unique_ptr<Ort::Session> session_;
+  int fft_threads_ = 1;
 };
 
 }  // namespace stems

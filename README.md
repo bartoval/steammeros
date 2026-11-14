@@ -36,6 +36,13 @@ L'API corrente è sincrona e accetta PCM float32 mono o stereo a 44.100 Hz.
 Le operazioni asincrone, il ricampionamento e i budget di risorse restano nelle
 fasi successive; il supporto verificato è Linux x86-64 CPU.
 
+Con più di un thread, la pipeline prepara lo spettro del segmento successivo e
+ricostruisce quello precedente mentre il modello elabora il segmento corrente.
+Per chiamata mantiene un segmento in preparazione e uno in ricostruzione; le iSTFT usano
+fino a quattro worker su canali indipendenti. L'ordine di ricomposizione resta
+invariato. `threads` regola i thread dell'inferenza, a cui si aggiungono questi
+worker; con `threads=1` tutto resta sequenziale. La chiamata C/Go resta sincrona.
+
 ## Modello
 
 SCNet-large di starrytong (commit `5d95bf9`). Licenza MIT anche per i pesi

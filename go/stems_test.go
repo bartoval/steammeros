@@ -42,19 +42,86 @@ func TestStemNamesConcurrentClose(t *testing.T) {
 func TestSeparateRejectsIncompatibleOutput(t *testing.T) {
 	for _, name := range []string{"wrong-output-shape", "wrong-output-type"} {
 		t.Run(name, func(t *testing.T) {
-			engine, err := NewEngine(Options{ModelPath: "testdata/" + name + ".onnx", Threads: 1})
+			engine, err := NewEngine(Options{ModelPath: "testdata/" + name + ".onnx", Threads: 2})
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer engine.Close()
 
-			stems, err := engine.Separate([][]float32{{0}}, 44100)
+			// Fail while the following chunk is being prepared: native workers must
+			// finish before Separate returns the model error and releases buffers.
+			stems, err := engine.Separate([][]float32{make([]float32, 10*44100+1)}, 44100)
 			var nativeErr *Error
 			if !errors.As(err, &nativeErr) || nativeErr.Status != 2 { // STEMS_ERR_MODEL
 				t.Fatalf("expected model error, got %v", err)
 			}
 			if stems != nil {
 				t.Fatal("incompatible output returned stems")
+			}
+		})
+	}
+}
+
+// The fixture repeats the input spectrum into all four stems. Three chunks of
+// different lengths exercise pipeline draining and ordered overlap-add cheaply.
+func TestSeparatePipelineMatchesSerial(t *testing.T) {
+	serial, err := NewEngine(Options{ModelPath: "testdata/repeat-spectrum.onnx", Threads: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer serial.Close()
+	parallel, err := NewEngine(Options{ModelPath: "testdata/repeat-spectrum.onnx", Threads: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer parallel.Close()
+
+	for _, tc := range []struct {
+		name     string
+		channels int
+		frames   int
+	}{
+		{"empty", 1, 0},
+		{"short", 1, 1},
+		{"mono-overlap", 1, 10*44100 + 1},
+		{"stereo-overlap", 2, 20*44100 + 173},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			audio := make([][]float32, tc.channels)
+			for c := range audio {
+				audio[c] = make([]float32, tc.frames)
+				for i := range audio[c] {
+					audio[c][i] = float32((i*(c+1))%4093-2046) / 8192
+				}
+			}
+			want, err := serial.Separate(audio, 44100)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := parallel.Separate(audio, 44100)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != len(want) {
+				t.Fatalf("got %d stems, want %d", len(got), len(want))
+			}
+			for s := range want {
+				if got[s].Name != want[s].Name || len(got[s].Channels) != tc.channels {
+					t.Fatalf("stem %d: wrong name or channel count", s)
+				}
+				for c := range audio {
+					if !slices.Equal(got[s].Channels[c], want[s].Channels[c]) {
+						t.Fatalf("%s channel %d: pipeline differs from serial", got[s].Name, c)
+					}
+					if len(got[s].Channels[c]) != tc.frames {
+						t.Fatalf("%s channel %d: wrong length", got[s].Name, c)
+					}
+					for i, sample := range got[s].Channels[c] {
+						if math.Abs(float64(sample-audio[c][i])) > 2e-6 {
+							t.Fatalf("%s channel %d sample %d: round trip differs", got[s].Name, c, i)
+						}
+					}
+				}
 			}
 		})
 	}

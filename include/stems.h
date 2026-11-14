@@ -37,7 +37,7 @@ typedef struct stems_result stems_result;
 typedef struct stems_engine_options {
   uint32_t struct_size;     /* sizeof(stems_engine_options), lets us add fields later */
   const char* model_path;   /* path to the .onnx model */
-  int32_t threads;          /* threads used by one separation; 0 = one per physical core */
+  int32_t threads;          /* inference threads; 0 = automatic, 1 = sequential pipeline */
 } stems_engine_options;
 
 /* Returns STEMS_API_VERSION of the linked library. */

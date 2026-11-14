@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <future>
+#include <utility>
 
 namespace stems {
 namespace {
@@ -61,27 +63,53 @@ std::vector<float> separate_track(const ScnetModel& model, const float* audio, i
   const std::vector<float> weight = triangle_weights();
   std::vector<float> sum(kStemCount * kModelChannels * samples, 0.0f);
   std::vector<float> weight_sum(samples, 0.0f);
-  std::vector<float> chunk_in;
-  std::vector<float> chunk_out;
-
-  for (int64_t offset = 0; offset < samples; offset += kStride) {
+  const auto prepare = [&](int64_t offset) {
     const int64_t length = std::min(kSegment, samples - offset);
 
-    chunk_in.resize(kModelChannels * length);
+    std::vector<float> chunk_in(kModelChannels * length);
     for (int c = 0; c < kModelChannels; ++c) {
       const float* source = stereo.data() + c * samples + offset;
       std::copy(source, source + length, chunk_in.begin() + c * length);
     }
 
-    chunk_out.resize(kStemCount * kModelChannels * length);
-    model.separate(chunk_in.data(), length, chunk_out.data());
+    return model.prepare(chunk_in.data(), length);
+  };
 
+  const auto reconstruct_and_blend = [&](ScnetModel::Output prediction, int64_t offset) {
+    const int64_t length = prediction.samples;
+    std::vector<float> chunk_out(kStemCount * kModelChannels * length);
+    model.reconstruct(prediction, chunk_out.data());
     for (int64_t signal = 0; signal < kStemCount * kModelChannels; ++signal) {
       float* target = sum.data() + signal * samples + offset;
       const float* source = chunk_out.data() + signal * length;
       for (int64_t i = 0; i < length; ++i) target[i] += weight[i] * source[i];
     }
     for (int64_t i = 0; i < length; ++i) weight_sum[offset + i] += weight[i];
+  };
+
+  if (!model.pipeline_enabled() || samples <= kStride) {
+    for (int64_t offset = 0; offset < samples; offset += kStride) {
+      auto input = prepare(offset);
+      reconstruct_and_blend(model.infer(input), offset);
+    }
+  } else {
+    // One prepared chunk ahead, one reconstruction behind, one Run at a time.
+    // Waiting for the previous reconstruction preserves overlap-add order and
+    // bounds retained ORT outputs to two, independent of track length.
+    // Futures join on all exits, including exceptions, before captured buffers die.
+    auto prepared = std::async(std::launch::async, prepare, int64_t{0});
+    std::future<void> reconstructed;
+    for (int64_t offset = 0; offset < samples; offset += kStride) {
+      auto input = prepared.get();
+      if (offset + kStride < samples) {
+        prepared = std::async(std::launch::async, prepare, offset + kStride);
+      }
+      auto prediction = model.infer(input);
+      if (reconstructed.valid()) reconstructed.get();
+      reconstructed = std::async(std::launch::async, reconstruct_and_blend,
+                                 std::move(prediction), offset);
+    }
+    reconstructed.get();
   }
 
   // Divide by the total weight and undo the normalization.

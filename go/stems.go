@@ -27,7 +27,7 @@ const APIVersion = 2
 // Options configures an Engine.
 type Options struct {
 	ModelPath string // path to the .onnx model
-	Threads   int    // threads for one separation; 0 = one per physical core
+	Threads   int    // inference threads; 0 = automatic, 1 = sequential pipeline
 }
 
 // Engine holds the loaded model. Safe for concurrent use; call Close when done.

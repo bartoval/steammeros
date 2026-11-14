@@ -1,7 +1,9 @@
 #include "scnet.h"
 
 #include <algorithm>
+#include <future>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "onnxruntime_cxx_api.h"
@@ -38,6 +40,7 @@ ScnetModel::ScnetModel(const std::string& onnx_path, int threads) {
     throw Ort::Exception("ONNX Runtime version mismatch: expected " STEMS_ORT_VERSION, ORT_FAIL);
   }
   if (threads <= 0) threads = std::max(1u, std::thread::hardware_concurrency() / 2);
+  fft_threads_ = std::min(threads, 4);
 
   Ort::SessionOptions options;
   options.SetIntraOpNumThreads(threads);
@@ -53,6 +56,12 @@ ScnetModel::ScnetModel(const std::string& onnx_path, int threads) {
 ScnetModel::~ScnetModel() = default;
 
 void ScnetModel::separate(const float* audio, int64_t samples, float* out) const {
+  auto input = prepare(audio, samples);
+  auto output = infer(input);
+  reconstruct(output, out);
+}
+
+ScnetModel::Input ScnetModel::prepare(const float* audio, int64_t samples) const {
   // Pad each channel with zeros at the end, like F.pad(x, (0, padding)).
   const int64_t padded = std::max(samples + model_padding(samples), kMinSamples + model_padding(kMinSamples));
   const int64_t frames = stft_frames(padded);
@@ -65,11 +74,15 @@ void ScnetModel::separate(const float* audio, int64_t samples, float* out) const
     std::copy(audio + c * samples, audio + (c + 1) * samples, channel.begin());
     stft(channel.data(), padded, &spectrum[(2 * c) * plane], &spectrum[(2 * c + 1) * plane]);
   }
+  return {samples, frames, std::move(spectrum)};
+}
 
+ScnetModel::Output ScnetModel::infer(Input& prepared) const {
+  const int64_t frames = prepared.frames;
   // Run the network: (1, 4, bins, frames) -> (1, 16, bins, frames).
   const auto memory = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
   const std::array<int64_t, 4> shape = {1, 2 * kModelChannels, kBins, frames};
-  Ort::Value input = Ort::Value::CreateTensor<float>(memory, spectrum.data(), spectrum.size(), shape.data(), shape.size());
+  Ort::Value input = Ort::Value::CreateTensor<float>(memory, prepared.spectrum.data(), prepared.spectrum.size(), shape.data(), shape.size());
   const char* input_names[] = {"spectrum"};
   const char* output_names[] = {"stems"};
   auto outputs = session_->Run(Ort::RunOptions{nullptr}, input_names, &input, 1, output_names, 1);
@@ -84,18 +97,34 @@ void ScnetModel::separate(const float* audio, int64_t samples, float* out) const
   if (output_info.GetShape() != expected_shape) {
     throw Ort::Exception("incompatible model output: expected stems shape [1, 16, 2049, input_frames]", ORT_INVALID_GRAPH);
   }
-  const float* result = outputs[0].GetTensorData<float>();
+  return {prepared.samples, frames, std::move(outputs[0])};
+}
+
+void ScnetModel::reconstruct(const Output& output, float* out) const {
+  const int64_t samples = output.samples;
+  const int64_t frames = output.frames;
+  const int64_t plane = kBins * frames;
+  const float* result = output.spectrum.GetTensorData<float>();
 
   // Output channel 4 * stem + 2 * channel + (0 real, 1 imag). iSTFT each, keep the first `samples`.
-  std::vector<float> signal(kHop * (frames - 1));
-  for (int s = 0; s < kStemCount; ++s) {
-    for (int c = 0; c < kModelChannels; ++c) {
-      const float* real = result + (4 * s + 2 * c) * plane;
-      const float* imag = result + (4 * s + 2 * c + 1) * plane;
+  // Channels are independent: parallelize them, preserving each channel's FFT
+  // and overlap-add order. At most four reconstruction workers, even on large CPUs.
+  const auto reconstruct_channels = [&](int worker) {
+    std::vector<float> signal(kHop * (frames - 1));
+    for (int channel = worker; channel < kStemCount * kModelChannels; channel += fft_threads_) {
+      const float* real = result + 2 * channel * plane;
+      const float* imag = result + (2 * channel + 1) * plane;
       istft(real, imag, frames, signal.data());
-      std::copy(signal.begin(), signal.begin() + samples, out + (s * kModelChannels + c) * samples);
+      std::copy(signal.begin(), signal.begin() + samples, out + channel * samples);
     }
+  };
+  std::vector<std::future<void>> workers;
+  workers.reserve(fft_threads_ - 1);
+  for (int worker = 1; worker < fft_threads_; ++worker) {
+    workers.push_back(std::async(std::launch::async, reconstruct_channels, worker));
   }
+  reconstruct_channels(0);
+  for (auto& worker : workers) worker.get();
 }
 
 }  // namespace stems

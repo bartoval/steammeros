@@ -31,6 +31,7 @@ file(GLOB_RECURSE ORT_ARCHIVES ${ORT_BUILD}/*.a)
 list(FILTER ORT_ARCHIVES EXCLUDE REGEX "/CMakeFiles/|libprotoc|libgtest|libgmock")
 
 # Our code.
+find_package(Threads REQUIRED)
 add_library(stems_core STATIC
   src/api.cpp
   src/scnet.cpp
@@ -43,6 +44,7 @@ target_include_directories(stems_core PRIVATE
 target_compile_definitions(stems_core PRIVATE STEMS_VERSION="${PROJECT_VERSION}")
 target_compile_definitions(stems_core PRIVATE STEMS_ORT_VERSION="${STEMS_ORT_VERSION}")
 target_compile_options(stems_core PRIVATE -Wall -Wextra)
+target_link_libraries(stems_core PRIVATE Threads::Threads)
 
 # libstems.a = our code + all of ONNX Runtime in one archive, so users link a single file.
 # ar's MRI script mode can merge archives (plain `ar` would nest them).
@@ -66,5 +68,5 @@ file(GENERATE OUTPUT pkgconfig/stems.pc CONTENT "Name: stems
 Description: In-process music source separation (static archive)
 Version: ${PROJECT_VERSION}
 Cflags: -I${CMAKE_CURRENT_SOURCE_DIR}/include
-Libs: ${STEMS_ARCHIVE} -lstdc++ -lm
+Libs: ${STEMS_ARCHIVE} -lstdc++ -lm -pthread
 ")

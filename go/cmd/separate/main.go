@@ -26,7 +26,7 @@ import (
 func main() {
 	model := flag.String("model", "models/scnet-large/scnet-large.onnx", "path to the .onnx model")
 	out := flag.String("out", "stems-out", "output folder")
-	threads := flag.Int("threads", 0, "threads per separation (0 = one per physical core)")
+	threads := flag.Int("threads", 0, "inference threads (0 = automatic; 1 = sequential pipeline)")
 	flag.Parse()
 
 	start := time.Now()
