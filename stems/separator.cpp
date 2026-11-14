@@ -205,13 +205,16 @@ Separation separate_track(const ScnetModel& model, const float* audio, int chann
   const Resampler back(kSamplerate, samplerate);
   const int64_t model_frames = to_model.output_length(frames);
 
+  // Resampling can't stop halfway, so check for cancellation after each step: a job
+  // cancelled at the very end must not come back as a success.
   std::vector<float> input = resample_planar(to_model, audio, channels, frames);
+  job.throw_if_cancelled();
   const std::vector<float> separated =
       separate_at_model_rate(model, input.data(), channels, model_frames, job);
   input = {};
+  std::vector<float> stems = resample_planar(back, separated.data(), kStemCount * channels, model_frames);
   job.throw_if_cancelled();
-  return {back.output_length(model_frames),
-          resample_planar(back, separated.data(), kStemCount * channels, model_frames)};
+  return {back.output_length(model_frames), std::move(stems)};
 }
 
 }  // namespace stems

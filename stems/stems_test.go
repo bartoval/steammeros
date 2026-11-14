@@ -40,6 +40,33 @@ func TestStemNamesConcurrentClose(t *testing.T) {
 	<-done
 }
 
+// Close from a progress callback used to deadlock: Close waited for Separate, which
+// waited for the callback. Now Close returns at once and the engine goes away after.
+func TestCloseFromProgress(t *testing.T) {
+	engine, err := NewEngine(Options{ModelPath: "testdata/repeat-spectrum.onnx", Threads: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	audio := [][]float32{make([]float32, 3*44100)}
+
+	done := make(chan error)
+	go func() {
+		_, err := engine.Separate(context.Background(), audio, 44100, func(float64) { engine.Close() })
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("deadlock: Separate didn't return after Close from its progress callback")
+	}
+	if _, err := engine.Separate(context.Background(), audio, 44100, nil); !errors.Is(err, ErrClosed) {
+		t.Fatalf("after Close: got %v, want ErrClosed", err)
+	}
+}
+
 // Tiny ONNX fixtures exercise the native output checks without the SCNet weights.
 func TestSeparateRejectsIncompatibleOutput(t *testing.T) {
 	for _, name := range []string{"wrong-output-shape", "wrong-output-type"} {

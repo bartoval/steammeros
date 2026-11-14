@@ -44,8 +44,10 @@ type Options struct {
 
 // Engine holds the loaded model. Safe for concurrent use; call Close when done.
 type Engine struct {
-	mu  sync.RWMutex // Separate and StemNames hold read locks; Close holds the write lock
-	ptr *C.stems_engine
+	mu     sync.Mutex // guards the three fields below
+	ptr    *C.stems_engine
+	closed bool
+	active int // Separate calls using ptr right now
 }
 
 // Stem is one separated source, planar: Channels[c][i] is sample i of channel c.
@@ -114,22 +116,49 @@ func NewEngine(opts Options) (*Engine, error) {
 	return &Engine{ptr: engine}, nil
 }
 
-// Close frees the model. Waits for running Separate calls. Calling it twice is fine.
+// Close frees the model. It doesn't wait: Separate calls already running finish first,
+// then the last one frees it; new calls get ErrClosed. Safe to call twice, and from
+// a progress callback.
 func (e *Engine) Close() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	C.stems_engine_destroy(e.ptr)
-	e.ptr = nil
+	e.closed = true
+	e.destroyIfUnused()
 	return nil
 }
 
-// StemNames returns the stems the model produces, in output order.
+// Marks a Separate call as using the native engine, unless it's closed.
+func (e *Engine) acquire() (*C.stems_engine, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return nil, ErrClosed
+	}
+	e.active++
+	return e.ptr, nil
+}
+
+func (e *Engine) release() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.active--
+	e.destroyIfUnused()
+}
+
+// Needs e.mu held.
+func (e *Engine) destroyIfUnused() {
+	if e.closed && e.active == 0 && e.ptr != nil {
+		C.stems_engine_destroy(e.ptr)
+		e.ptr = nil
+	}
+}
+
+// StemNames returns the stems the model produces, in output order. They're fixed, so
+// this works on a closed Engine too.
 func (e *Engine) StemNames() []string {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	names := make([]string, int(C.stems_engine_stem_count(e.ptr)))
+	names := make([]string, int(C.stems_engine_stem_count(nil)))
 	for i := range names {
-		names[i] = C.GoString(C.stems_engine_stem_name(e.ptr, C.int32_t(i)))
+		names[i] = C.GoString(C.stems_engine_stem_name(nil, C.int32_t(i)))
 	}
 	return names
 }
@@ -142,11 +171,11 @@ func (e *Engine) StemNames() []string {
 // `progress`, if not nil, gets the fraction done (0 to 1) about every 100 ms, from
 // another goroutine, and 1 at the end.
 func (e *Engine) Separate(ctx context.Context, audio [][]float32, sampleRate int, progress func(float64)) ([]Stem, error) {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	if e.ptr == nil {
-		return nil, ErrClosed
+	engine, err := e.acquire()
+	if err != nil {
+		return nil, err
 	}
+	defer e.release()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -174,7 +203,7 @@ func (e *Engine) Separate(ctx context.Context, audio [][]float32, sampleRate int
 
 	var result *C.stems_result
 	var cerr C.stems_error
-	status := C.stems_separate(e.ptr, input, C.int32_t(len(audio)), C.int64_t(frames), C.int32_t(sampleRate), job, &result, &cerr)
+	status := C.stems_separate(engine, input, C.int32_t(len(audio)), C.int64_t(frames), C.int32_t(sampleRate), job, &result, &cerr)
 	close(stop)
 	<-stopped
 	if status == C.STEMS_ERR_CANCELLED && ctx.Err() != nil {
@@ -187,7 +216,7 @@ func (e *Engine) Separate(ctx context.Context, audio [][]float32, sampleRate int
 	if progress != nil {
 		progress(1)
 	}
-	return e.copyResult(result), nil
+	return copyResult(result), nil
 }
 
 // The C side wants one contiguous planar buffer. We copy into it instead of handing over
@@ -209,12 +238,12 @@ func toPlanar(audio [][]float32) ([]float32, int, error) {
 }
 
 // Copies the native result into Go memory, so it can be freed right away.
-func (e *Engine) copyResult(result *C.stems_result) []Stem {
+func copyResult(result *C.stems_result) []Stem {
 	frames := int(C.stems_result_frames(result))
 	channels := int(C.stems_result_channels(result))
 	stems := make([]Stem, int(C.stems_result_stem_count(result)))
 	for s := range stems {
-		stems[s].Name = C.GoString(C.stems_engine_stem_name(e.ptr, C.int32_t(s)))
+		stems[s].Name = C.GoString(C.stems_engine_stem_name(nil, C.int32_t(s)))
 		stems[s].Channels = make([][]float32, channels)
 		for c := range channels {
 			stems[s].Channels[c] = make([]float32, frames)

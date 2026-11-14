@@ -4,6 +4,7 @@ package audiofile
 
 import (
 	"bufio"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -14,9 +15,9 @@ import (
 )
 
 // Decode reads any audio file ffmpeg understands into planar float32 (audio[channel][sample]),
-// keeping its sample rate and channels.
-func Decode(path string) ([][]float32, int, error) {
-	probe, err := exec.Command("ffprobe", "-v", "error", "-select_streams", "a:0",
+// keeping its sample rate and channels. Cancelling ctx kills ffmpeg.
+func Decode(ctx context.Context, path string) ([][]float32, int, error) {
+	probe, err := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-select_streams", "a:0",
 		"-show_entries", "stream=sample_rate,channels", "-of", "csv=p=0", path).Output()
 	if err != nil {
 		return nil, 0, fmt.Errorf("ffprobe %s: %w", path, err)
@@ -31,7 +32,7 @@ func Decode(path string) ([][]float32, int, error) {
 		return nil, 0, fmt.Errorf("ffprobe %s: unexpected output %q", path, probe)
 	}
 
-	raw, err := exec.Command("ffmpeg", "-v", "error", "-i", path, "-f", "f32le", "-acodec", "pcm_f32le", "pipe:1").Output()
+	raw, err := exec.CommandContext(ctx, "ffmpeg", "-v", "error", "-i", path, "-f", "f32le", "-acodec", "pcm_f32le", "pipe:1").Output()
 	if err != nil {
 		return nil, 0, fmt.Errorf("ffmpeg %s: %w", path, err)
 	}

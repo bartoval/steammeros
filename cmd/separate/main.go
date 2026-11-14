@@ -44,7 +44,7 @@ func main() {
 	fmt.Printf("model loaded in %.2f s\n", time.Since(start).Seconds())
 
 	for _, input := range flag.Args() {
-		audio, sampleRate, err := audiofile.Decode(input)
+		audio, sampleRate, err := audiofile.Decode(ctx, input)
 		if err != nil {
 			fail(err)
 		}

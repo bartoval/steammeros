@@ -64,7 +64,8 @@ stems_status stems_engine_create(const stems_engine_options* options, stems_engi
 /* Frees the engine. Results created by it stay valid. NULL is a no-op. */
 void stems_engine_destroy(stems_engine* engine);
 
-/* Number of stems the model produces and their names ("drums", "bass", "other", "vocals"). */
+/* Number of stems the model produces and their names ("drums", "bass", "other", "vocals").
+ * They are fixed, so `engine` may be NULL. */
 int32_t stems_engine_stem_count(const stems_engine* engine);
 const char* stems_engine_stem_name(const stems_engine* engine, int32_t stem);
 

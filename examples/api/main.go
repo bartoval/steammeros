@@ -99,6 +99,7 @@ func (s *server) create(ctx context.Context, w http.ResponseWriter, r *http.Requ
 
 	dir := filepath.Join(s.dir, id)
 	if err := saveUpload(r.Body, dir); err != nil {
+		os.RemoveAll(dir) // no job is registered, so nothing else would delete it
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -172,8 +173,11 @@ func (s *server) run(ctx context.Context, j *job) {
 	}
 	s.update(j, func() { j.Status = "running" })
 
-	audio, sampleRate, err := audiofile.Decode(filepath.Join(j.dir, "upload"))
+	audio, sampleRate, err := audiofile.Decode(ctx, filepath.Join(j.dir, "upload"))
 	if err != nil {
+		if ctx.Err() != nil {
+			err = ctx.Err() // ffmpeg was killed because the job was deleted
+		}
 		s.finish(j, err)
 		return
 	}
@@ -186,6 +190,10 @@ func (s *server) run(ctx context.Context, j *job) {
 
 	var downloads []string
 	for _, part := range parts {
+		if ctx.Err() != nil { // deleted while separating: don't write files nobody will fetch
+			s.finish(j, ctx.Err())
+			return
+		}
 		if err := audiofile.WriteWav(filepath.Join(j.dir, part.Name+".wav"), part.Channels, sampleRate); err != nil {
 			s.finish(j, err)
 			return
