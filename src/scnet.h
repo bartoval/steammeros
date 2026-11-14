@@ -34,7 +34,9 @@ class ScnetModel {
     Ort::Value spectrum;
   };
 
-  ScnetModel(const std::string& onnx_path, int threads);
+  // `cuda_device` >= 0 runs the network on that GPU (STFT and the rest stay on the CPU);
+  // -1 runs everything on the CPU.
+  ScnetModel(const std::string& onnx_path, int threads, int cuda_device);
   ~ScnetModel();
 
   // `audio`: 2 planar channels of `samples` each (already normalized by the caller).

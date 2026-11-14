@@ -30,6 +30,10 @@ const APIVersion = 3
 type Options struct {
 	ModelPath string // path to the .onnx model
 	Threads   int    // inference threads; 0 = automatic, 1 = sequential pipeline
+
+	// CUDA runs the model on an NVIDIA GPU (needs the library built with STEMS_CUDA=ON).
+	CUDA       bool
+	CUDADevice int // which GPU, when CUDA is set
 }
 
 // Engine holds the loaded model. Safe for concurrent use; call Close when done.
@@ -71,6 +75,8 @@ func NewEngine(opts Options) (*Engine, error) {
 		struct_size: C.uint32_t(unsafe.Sizeof(C.stems_engine_options{})),
 		model_path:  path,
 		threads:     C.int32_t(opts.Threads),
+		use_cuda:    C.int32_t(boolToInt(opts.CUDA)),
+		cuda_device: C.int32_t(opts.CUDADevice),
 	}
 	var engine *C.stems_engine
 	var cerr C.stems_error
@@ -201,6 +207,13 @@ func watch(ctx context.Context, job *C.stems_job, progress func(float64), stop <
 			progress(float64(C.stems_job_progress(job)))
 		}
 	}
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func toError(cerr *C.stems_error) error {

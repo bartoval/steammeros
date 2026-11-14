@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <future>
+#include <string>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -33,9 +34,21 @@ int64_t model_padding(int64_t samples) {
   return padding;
 }
 
+// Runs the network on a GPU. TF32 stays off so results keep matching the FP32 original,
+// and the arena grows by what's asked instead of doubling, to keep VRAM down.
+// Fails with an Ort::Exception on a CPU-only build or without CUDA/cuDNN on the system.
+void use_cuda(Ort::SessionOptions& options, int device) {
+  Ort::CUDAProviderOptions cuda;
+  cuda.Update({{"device_id", std::to_string(device)},
+               {"use_tf32", "0"},
+               {"cudnn_conv_algo_search", "HEURISTIC"},
+               {"cudnn_conv_use_max_workspace", "0"}});
+  options.AppendExecutionProvider_CUDA_V2(*cuda);
+}
+
 }  // namespace
 
-ScnetModel::ScnetModel(const std::string& onnx_path, int threads) {
+ScnetModel::ScnetModel(const std::string& onnx_path, int threads, int cuda_device) {
   if (std::string(OrtGetApiBase()->GetVersionString()) != STEMS_ORT_VERSION) {
     throw Ort::Exception("ONNX Runtime version mismatch: expected " STEMS_ORT_VERSION, ORT_FAIL);
   }
@@ -52,7 +65,10 @@ ScnetModel::ScnetModel(const std::string& onnx_path, int threads) {
   options.DisableMemPattern();
   // Keep the CPU arena: without it a 25 s excerpt peaks ~300 MB lower, but a 4 min
   // track ~450 MB higher (malloc fragments over many chunks).
-  session_ = std::make_unique<Ort::Session>(ort_env(), onnx_path.c_str(), options);
+
+  Ort::Env& env = ort_env();  // before the CUDA options: ORT logs through it
+  if (cuda_device >= 0) use_cuda(options, cuda_device);
+  session_ = std::make_unique<Ort::Session>(env, onnx_path.c_str(), options);
 }
 
 ScnetModel::~ScnetModel() = default;

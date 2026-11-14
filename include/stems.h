@@ -40,6 +40,8 @@ typedef struct stems_engine_options {
   uint32_t struct_size;   /* sizeof(stems_engine_options), lets us add fields later */
   const char* model_path; /* path to the .onnx model */
   int32_t threads;        /* inference threads; 0 = automatic, 1 = sequential pipeline */
+  int32_t use_cuda;       /* nonzero: run the model on an NVIDIA GPU (needs a STEMS_CUDA build) */
+  int32_t cuda_device;    /* which GPU, when use_cuda is set */
 } stems_engine_options;
 
 /* Returns STEMS_API_VERSION of the linked library. */

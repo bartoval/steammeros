@@ -15,7 +15,23 @@ export PKG_CONFIG_PATH=$PWD/build/pkgconfig
 (cd go && go test ./...)
 ```
 
-`go get` alone isn't enough: the native archive has to be built first.
+`go get` alone isn't enough: the native archive has to be built first. After rebuilding
+it, pass `-a` to `go build`/`go test`: Go caches cgo builds and doesn't notice changes
+inside `libstems.a`.
+
+### GPU (NVIDIA)
+
+```sh
+tools/fetch_ort_gpu.sh
+cmake -S . -B build-cuda -G Ninja -DSTEMS_CUDA=ON && cmake --build build-cuda
+export PKG_CONFIG_PATH=$PWD/build-cuda/pkgconfig
+```
+
+Then set `CUDA: true` in the Go options (`-cuda 0` in `cmd/separate`). This build links the
+official ONNX Runtime GPU release dynamically and needs CUDA 13 and cuDNN 9 at run time
+(`libcudart`, `libcublas`, `libcurand`, `libcufft`, `libcudnn`). Precision stays FP32
+(TF32 off), so GPU output matches the CPU and the original. A 253 s track takes ~30 s on
+an RTX 4060 Laptop GPU, with ~6.3 GB of VRAM.
 
 ONNX Runtime is pinned to **1.31.1** (`tools/requirements.lock`), for the native build
 and for the Python tools. `tools/build_ort.sh` checks out commit

@@ -17,18 +17,34 @@ FetchContent_Declare(pocketfft
   URL_HASH SHA256=db236e44b1020dd0b415e5040ce10d8be604fefb7ce83ec0b32bc0f78975aa2f)
 FetchContent_MakeAvailable(pocketfft)
 
-# ONNX Runtime, built as static libraries by tools/build_ort.sh.
+# STEMS_CUDA=ON: run the model on NVIDIA GPUs. Links the official ONNX Runtime GPU build
+# dynamically (tools/fetch_ort_gpu.sh); its CUDA provider is a shared library by design.
+# OFF (default): ONNX Runtime built from source and linked statically (tools/build_ort.sh).
+option(STEMS_CUDA "Build against the ONNX Runtime CUDA release" OFF)
+
 set(ORT_REQUIREMENTS ${CMAKE_CURRENT_SOURCE_DIR}/tools/requirements.lock)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${ORT_REQUIREMENTS})
 file(STRINGS ${ORT_REQUIREMENTS} ORT_VERSION_LINE REGEX "^onnxruntime==")
 string(REPLACE "onnxruntime==" "" STEMS_ORT_VERSION "${ORT_VERSION_LINE}")
-set(ORT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/onnxruntime)
-set(ORT_BUILD ${ORT_DIR}/build/Linux/Release)
-if(NOT EXISTS ${ORT_BUILD}/libonnxruntime_session.a)
-  message(FATAL_ERROR "ONNX Runtime not built yet: run tools/build_ort.sh first")
+if(STEMS_CUDA)
+  set(ORT_GPU_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/onnxruntime-gpu)
+  if(NOT EXISTS ${ORT_GPU_DIR}/lib/libonnxruntime.so)
+    message(FATAL_ERROR "ONNX Runtime GPU not there yet: run tools/fetch_ort_gpu.sh first")
+  endif()
+  set(ORT_INCLUDE ${ORT_GPU_DIR}/include)
+  set(ORT_ARCHIVES "")  # nothing to merge: ONNX Runtime stays a shared library
+  set(ORT_LIBS "-L${ORT_GPU_DIR}/lib -Wl,-rpath,${ORT_GPU_DIR}/lib -lonnxruntime")
+else()
+  set(ORT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/onnxruntime)
+  set(ORT_BUILD ${ORT_DIR}/build/Linux/Release)
+  if(NOT EXISTS ${ORT_BUILD}/libonnxruntime_session.a)
+    message(FATAL_ERROR "ONNX Runtime not built yet: run tools/build_ort.sh first")
+  endif()
+  set(ORT_INCLUDE ${ORT_DIR}/include/onnxruntime/core/session)
+  file(GLOB_RECURSE ORT_ARCHIVES ${ORT_BUILD}/*.a)
+  list(FILTER ORT_ARCHIVES EXCLUDE REGEX "/CMakeFiles/|libprotoc|libgtest|libgmock")
+  set(ORT_LIBS "")
 endif()
-file(GLOB_RECURSE ORT_ARCHIVES ${ORT_BUILD}/*.a)
-list(FILTER ORT_ARCHIVES EXCLUDE REGEX "/CMakeFiles/|libprotoc|libgtest|libgmock")
 
 # Our code.
 find_package(Threads REQUIRED)
@@ -41,13 +57,14 @@ add_library(stems_core STATIC
 target_include_directories(stems_core PUBLIC include)
 target_include_directories(stems_core PRIVATE
   ${pocketfft_SOURCE_DIR}
-  ${ORT_DIR}/include/onnxruntime/core/session)
+  ${ORT_INCLUDE})
 target_compile_definitions(stems_core PRIVATE STEMS_VERSION="${PROJECT_VERSION}")
 target_compile_definitions(stems_core PRIVATE STEMS_ORT_VERSION="${STEMS_ORT_VERSION}")
 target_compile_options(stems_core PRIVATE -Wall -Wextra)
 target_link_libraries(stems_core PRIVATE Threads::Threads)
 
-# libstems.a = our code + all of ONNX Runtime in one archive, so users link a single file.
+# libstems.a = our code + all of ONNX Runtime in one archive, so users link a single file
+# (with STEMS_CUDA, just our code).
 # ar's MRI script mode can merge archives (plain `ar` would nest them).
 set(STEMS_ARCHIVE ${CMAKE_CURRENT_BINARY_DIR}/libstems.a)
 set(MRI "CREATE ${STEMS_ARCHIVE}\nADDLIB $<TARGET_FILE:stems_core>\n")
@@ -66,8 +83,8 @@ add_custom_target(stems ALL DEPENDS ${STEMS_ARCHIVE})
 
 # pkg-config file consumed by cgo (`#cgo pkg-config: stems`).
 file(GENERATE OUTPUT pkgconfig/stems.pc CONTENT "Name: stems
-Description: In-process music source separation (static archive)
+Description: In-process music source separation
 Version: ${PROJECT_VERSION}
 Cflags: -I${CMAKE_CURRENT_SOURCE_DIR}/include
-Libs: ${STEMS_ARCHIVE} -lstdc++ -lm -pthread
+Libs: ${STEMS_ARCHIVE} ${ORT_LIBS} -lstdc++ -lm -pthread
 ")

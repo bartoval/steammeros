@@ -29,6 +29,7 @@ func main() {
 	model := flag.String("model", "models/scnet-large/scnet-large.onnx", "path to the .onnx model")
 	out := flag.String("out", "stems-out", "output folder")
 	threads := flag.Int("threads", 0, "inference threads (0 = automatic; 1 = sequential pipeline)")
+	cuda := flag.Int("cuda", -1, "run the model on this GPU (needs a STEMS_CUDA build); -1 = CPU")
 	flag.Parse()
 
 	// Ctrl-C cancels the separation in progress instead of killing the process mid-write.
@@ -36,7 +37,7 @@ func main() {
 	defer stop()
 
 	start := time.Now()
-	engine, err := stems.NewEngine(stems.Options{ModelPath: *model, Threads: *threads})
+	engine, err := stems.NewEngine(stems.Options{ModelPath: *model, Threads: *threads, CUDA: *cuda >= 0, CUDADevice: *cuda})
 	if err != nil {
 		fail(err)
 	}

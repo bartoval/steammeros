@@ -108,7 +108,8 @@ stems_status stems_engine_create(const stems_engine_options* options, stems_engi
 
   return guarded(error, STEMS_ERR_MODEL, [&] {
     auto created = std::make_unique<stems_engine>();
-    created->model = std::make_unique<stems::ScnetModel>(options->model_path, options->threads);
+    const int cuda_device = options->use_cuda ? options->cuda_device : -1;
+    created->model = std::make_unique<stems::ScnetModel>(options->model_path, options->threads, cuda_device);
     *engine = created.release();
   });
 }

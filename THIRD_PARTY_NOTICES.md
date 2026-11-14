@@ -6,12 +6,12 @@ Code and models from other projects that end up in this library or its builds.
 |-|-|-|
 | [SCNet](https://github.com/starrytong/SCNet), Copyright (c) 2024 starrytong | model weights (exported to ONNX); inference steps ported to C++ | MIT |
 | [julius](https://github.com/adefossez/julius), Copyright 2020 Alexandre Défossez | `resample_frac` ported to `src/resample.cpp` | MIT |
-| [ONNX Runtime](https://github.com/microsoft/onnxruntime), Copyright (c) Microsoft Corporation | fetched by `tools/build_ort.sh`, linked statically into `libstems.a` | MIT |
+| [ONNX Runtime](https://github.com/microsoft/onnxruntime), Copyright (c) Microsoft Corporation | CPU: built by `tools/build_ort.sh`, linked statically into `libstems.a`; CUDA: official release from `tools/fetch_ort_gpu.sh`, linked dynamically | MIT |
 | [pocketfft](https://gitlab.mpcdf.mpg.de/mtr/pocketfft), Copyright (C) 2010-2018 Max-Planck-Society | fetched by CMake, compiled into `libstems.a` | BSD-3-Clause |
 
 ONNX Runtime bundles further libraries (abseil, protobuf, re2, Eigen, ...). Binaries built
 from this repository must ship ONNX Runtime's `ThirdPartyNotices.txt`, found in
-`third_party/onnxruntime/` after the build.
+`third_party/onnxruntime/` (or `third_party/onnxruntime-gpu/` for the CUDA build).
 
 ## MIT License (SCNet, julius, ONNX Runtime)
 
