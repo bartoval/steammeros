@@ -3,17 +3,38 @@
 Separazione musicale in stem nello stesso processo dell'applicazione: nucleo C++20 con
 API C, pacchetto Go via cgo, collegamento statico. Modello: SCNet-large.
 
-Stato: fase 1 (riferimento del modello originale prodotto e misurato). La separazione nativa non è ancora implementata.
+Stato: gate tecnico CPU della fase 2 superato sul corpus locale. La separazione
+nativa supera la parità per tutti i 60 stem di 12 estratti e tre brani completi.
+Metodo, risultati e attività pendenti in [docs/STATUS.md](docs/STATUS.md) e
+[docs/phase2-validation.md](docs/phase2-validation.md).
 
 ## Build
 
 ```sh
+tools/build_ort.sh
 cmake -S . -B build -G Ninja && cmake --build build
 export PKG_CONFIG_PATH=$PWD/build/pkgconfig
 (cd go && go test ./...)
 ```
 
 `go get` da solo non basta: serve prima compilare l'archivio nativo.
+
+Per build nativa ed esperimenti Python usare ONNX Runtime **1.31.1**, fissato in
+`tools/requirements.lock`. I sorgenti nativi devono corrispondere al commit
+`6af1a932e2286d5c58166085d24c68783033edee` (tag `v1.31.1`), verificato da
+`tools/build_ort.sh` anche quando il checkout esiste già. Lo script rifiuta modifiche
+ai file tracciati. Prima della build CMake eseguire `tools/build_ort.sh`.
+
+L'export verifica la versione Python prima di elaborare il modello; il nucleo
+verifica la versione del runtime effettivamente collegato prima di creare l'engine.
+L'ambiente Python deve essere aggiornato esplicitamente, per esempio con
+`.venv/bin/python -m pip install 'onnxruntime==1.31.1'`. Dopo l'allineamento occorre
+rieseguire export e confronti: i risultati ottenuti con Python 1.32.0 non attestano
+la parità della build nativa 1.31.1.
+
+L'API corrente è sincrona e accetta PCM float32 mono o stereo a 44.100 Hz.
+Le operazioni asincrone, il ricampionamento e i budget di risorse restano nelle
+fasi successive; il supporto verificato è Linux x86-64 CPU.
 
 ## Modello
 

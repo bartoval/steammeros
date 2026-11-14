@@ -1,0 +1,107 @@
+#include "separator.h"
+
+#include <algorithm>
+#include <cmath>
+
+namespace stems {
+namespace {
+
+constexpr int64_t kSegment = 20 * kSamplerate;  // apply_model(segment=20)
+constexpr int64_t kStride = kSegment / 2;       // overlap=0.5
+
+// apply_model's blending weight: rises 1..N/2, falls N/2..1, scaled so the peak is 1.
+// Where chunks overlap, each one counts proportionally to how far we are from its edges.
+std::vector<float> triangle_weights() {
+  std::vector<float> weight(kSegment);
+  const float peak = kSegment / 2;
+  for (int64_t i = 0; i < kSegment; ++i) {
+    weight[i] = (i < kSegment / 2 ? i + 1 : kSegment - i) / peak;
+  }
+  return weight;
+}
+
+struct Normalization {
+  double mean = 0.0;
+  double std = 1.0;
+};
+
+// Mean and standard deviation of the mono downmix, over the whole track
+// (unbiased std, like torch.std). Silence has std 0: we keep 1 instead of
+// dividing by zero (the original would produce NaN there).
+Normalization measure(const std::vector<float>& stereo, int64_t samples) {
+  double sum = 0.0;
+  for (int64_t i = 0; i < samples; ++i) sum += 0.5 * (stereo[i] + stereo[samples + i]);
+  const double mean = sum / samples;
+
+  double squares = 0.0;
+  for (int64_t i = 0; i < samples; ++i) {
+    const double d = 0.5 * (stereo[i] + stereo[samples + i]) - mean;
+    squares += d * d;
+  }
+  const double std = samples > 1 ? std::sqrt(squares / (samples - 1)) : 0.0;
+  return {mean, std > 0.0 ? std : 1.0};
+}
+
+}  // namespace
+
+std::vector<float> separate_track(const ScnetModel& model, const float* audio, int channels, int64_t samples) {
+  if (samples == 0) return {};
+
+  // The model is stereo: mono input is duplicated on both channels.
+  std::vector<float> stereo(kModelChannels * samples);
+  for (int c = 0; c < kModelChannels; ++c) {
+    const float* source = audio + (channels == 1 ? 0 : c) * samples;
+    std::copy(source, source + samples, stereo.begin() + c * samples);
+  }
+
+  const Normalization norm = measure(stereo, samples);
+  for (float& x : stereo) x = static_cast<float>((x - norm.mean) / norm.std);
+
+  // Weighted overlap-add of the chunks.
+  const std::vector<float> weight = triangle_weights();
+  std::vector<float> sum(kStemCount * kModelChannels * samples, 0.0f);
+  std::vector<float> weight_sum(samples, 0.0f);
+  std::vector<float> chunk_in;
+  std::vector<float> chunk_out;
+
+  for (int64_t offset = 0; offset < samples; offset += kStride) {
+    const int64_t length = std::min(kSegment, samples - offset);
+
+    chunk_in.resize(kModelChannels * length);
+    for (int c = 0; c < kModelChannels; ++c) {
+      const float* source = stereo.data() + c * samples + offset;
+      std::copy(source, source + length, chunk_in.begin() + c * length);
+    }
+
+    chunk_out.resize(kStemCount * kModelChannels * length);
+    model.separate(chunk_in.data(), length, chunk_out.data());
+
+    for (int64_t signal = 0; signal < kStemCount * kModelChannels; ++signal) {
+      float* target = sum.data() + signal * samples + offset;
+      const float* source = chunk_out.data() + signal * length;
+      for (int64_t i = 0; i < length; ++i) target[i] += weight[i] * source[i];
+    }
+    for (int64_t i = 0; i < length; ++i) weight_sum[offset + i] += weight[i];
+  }
+
+  // Divide by the total weight and undo the normalization.
+  // For mono input, average the two output channels back into one.
+  std::vector<float> out(kStemCount * channels * samples);
+  for (int s = 0; s < kStemCount; ++s) {
+    const float* left = sum.data() + (s * kModelChannels) * samples;
+    const float* right = sum.data() + (s * kModelChannels + 1) * samples;
+    for (int64_t i = 0; i < samples; ++i) {
+      const double l = left[i] / weight_sum[i] * norm.std + norm.mean;
+      const double r = right[i] / weight_sum[i] * norm.std + norm.mean;
+      if (channels == 1) {
+        out[s * samples + i] = static_cast<float>(0.5 * (l + r));
+      } else {
+        out[(s * 2) * samples + i] = static_cast<float>(l);
+        out[(s * 2 + 1) * samples + i] = static_cast<float>(r);
+      }
+    }
+  }
+  return out;
+}
+
+}  // namespace stems
