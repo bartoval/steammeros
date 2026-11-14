@@ -32,9 +32,10 @@ L'ambiente Python deve essere aggiornato esplicitamente, per esempio con
 rieseguire export e confronti: i risultati ottenuti con Python 1.32.0 non attestano
 la parità della build nativa 1.31.1.
 
-L'API corrente è sincrona e accetta PCM float32 mono o stereo a 44.100 Hz.
-Le operazioni asincrone, il ricampionamento e i budget di risorse restano nelle
-fasi successive; il supporto verificato è Linux x86-64 CPU.
+L'API corrente è sincrona e accetta PCM float32 mono o stereo da 8 a 384 kHz: come
+nell'originale, l'audio passa a 44,1 kHz per il modello e torna alla frequenza
+d'ingresso (port di `julius.resample_frac`). Le operazioni asincrone e i budget di
+risorse restano nelle fasi successive; il supporto verificato è Linux x86-64 CPU.
 
 Con più di un thread, la pipeline prepara lo spettro del segmento successivo e
 ricostruisce quello precedente mentre il modello elabora il segmento corrente.

@@ -34,6 +34,7 @@ list(FILTER ORT_ARCHIVES EXCLUDE REGEX "/CMakeFiles/|libprotoc|libgtest|libgmock
 find_package(Threads REQUIRED)
 add_library(stems_core STATIC
   src/api.cpp
+  src/resample.cpp
   src/scnet.cpp
   src/separator.cpp
   src/spectrogram.cpp)

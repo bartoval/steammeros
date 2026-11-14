@@ -99,7 +99,8 @@ func (e *Engine) StemNames() []string {
 }
 
 // Separate splits audio into stems. `audio` is planar (audio[channel][sample]), 1 or 2
-// channels of equal length. The result has the same channels, length and sample rate.
+// channels of equal length. The result has the same channels and sample rate; its length
+// matches too at 44100 Hz, while other rates can come back a sample shorter.
 // Blocks until done.
 func (e *Engine) Separate(audio [][]float32, sampleRate int) ([]Stem, error) {
 	e.mu.RLock()
@@ -135,15 +136,16 @@ func (e *Engine) Separate(audio [][]float32, sampleRate int) ([]Stem, error) {
 	defer C.stems_result_destroy(result)
 
 	// Copy the samples into Go memory so the native result can be freed right away.
+	outFrames := int(C.stems_result_frames(result))
 	stems := make([]Stem, int(C.stems_result_stem_count(result)))
 	for s := range stems {
 		stems[s].Name = C.GoString(C.stems_engine_stem_name(e.ptr, C.int32_t(s)))
 		stems[s].Channels = make([][]float32, len(audio))
 		for c := range audio {
-			stems[s].Channels[c] = make([]float32, frames)
-			if frames > 0 {
+			stems[s].Channels[c] = make([]float32, outFrames)
+			if outFrames > 0 {
 				samples := C.stems_result_samples(result, C.int32_t(s), C.int32_t(c))
-				copy(stems[s].Channels[c], unsafe.Slice((*float32)(unsafe.Pointer(samples)), frames))
+				copy(stems[s].Channels[c], unsafe.Slice((*float32)(unsafe.Pointer(samples)), outFrames))
 			}
 		}
 	}

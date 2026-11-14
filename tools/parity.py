@@ -10,7 +10,6 @@ import numpy as np
 import soundfile as sf
 
 STEMS = ["drums", "bass", "other", "vocals"]
-SAMPLERATE = 44100
 SILENT_RMS = 1e-4       # reference quieter than this (-80 dBFS) counts as near-silent
 MIN_SNR_DB = 50.0       # whole stem
 MIN_WINDOW_SNR_DB = 40.0  # worst 1 s window: catches local glitches, e.g. at chunk boundaries
@@ -30,17 +29,17 @@ def rms(x: np.ndarray) -> float:
 
 
 # Worst SNR over 1 s windows, skipping windows where the reference is near-silent.
-def worst_window_snr(reference: np.ndarray, estimate: np.ndarray) -> float:
+def worst_window_snr(reference: np.ndarray, estimate: np.ndarray, samplerate: int) -> float:
     worst = float("inf")
-    for start in range(0, len(reference), SAMPLERATE):
-        ref = reference[start:start + SAMPLERATE]
+    for start in range(0, len(reference), samplerate):
+        ref = reference[start:start + samplerate]
         if rms(ref) >= SILENT_RMS:
-            worst = min(worst, snr(ref, estimate[start:start + SAMPLERATE]))
+            worst = min(worst, snr(ref, estimate[start:start + samplerate]))
     return worst
 
 
 # Compares one stem and returns (passed, printable summary).
-def compare_stem(reference: np.ndarray, estimate: np.ndarray) -> tuple[bool, str]:
+def compare_stem(reference: np.ndarray, estimate: np.ndarray, samplerate: int) -> tuple[bool, str]:
     if reference.shape != estimate.shape:
         return False, f"shape {estimate.shape} != {reference.shape}"
     if not np.isfinite(estimate).all():
@@ -51,7 +50,7 @@ def compare_stem(reference: np.ndarray, estimate: np.ndarray) -> tuple[bool, str
         return max_error <= MAX_SILENT_ERROR, f"near-silent, max err {max_error:.1e}"
 
     whole = snr(reference, estimate)
-    window = worst_window_snr(reference, estimate)
+    window = worst_window_snr(reference, estimate, samplerate)
     passed = whole >= MIN_SNR_DB and window >= MIN_WINDOW_SNR_DB
     return passed, f"SNR {whole:5.1f} dB, worst 1 s {window:5.1f} dB, max err {max_error:.1e}"
 
@@ -63,9 +62,7 @@ def compare_files(reference_path: Path, estimate_path: Path) -> tuple[bool, str]
     estimate, estimate_rate = sf.read(estimate_path, dtype="float64")
     if estimate_rate != reference_rate:
         return False, f"sample rate {estimate_rate} Hz != reference {reference_rate} Hz"
-    if reference_rate != SAMPLERATE:
-        return False, f"sample rate {reference_rate} Hz != expected {SAMPLERATE} Hz"
-    return compare_stem(reference, estimate)
+    return compare_stem(reference, estimate, reference_rate)
 
 
 def main() -> int:

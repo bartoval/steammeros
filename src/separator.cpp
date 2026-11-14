@@ -5,6 +5,8 @@
 #include <future>
 #include <utility>
 
+#include "resample.h"
+
 namespace stems {
 namespace {
 
@@ -44,9 +46,9 @@ Normalization measure(const std::vector<float>& stereo, int64_t samples) {
   return {mean, std > 0.0 ? std : 1.0};
 }
 
-}  // namespace
-
-std::vector<float> separate_track(const ScnetModel& model, const float* audio, int channels, int64_t samples) {
+// The original separation at the model rate: chunk, run, blend, denormalize.
+// Returns kStemCount * channels * samples floats, [stem][channel][sample].
+std::vector<float> separate_at_model_rate(const ScnetModel& model, const float* audio, int channels, int64_t samples) {
   if (samples == 0) return {};
 
   // The model is stereo: mono input is duplicated on both channels.
@@ -130,6 +132,37 @@ std::vector<float> separate_track(const ScnetModel& model, const float* audio, i
     }
   }
   return out;
+}
+
+// Resamples each of `signals` planar channels, one thread per channel.
+std::vector<float> resample_planar(const Resampler& resampler, const float* audio, int signals, int64_t frames) {
+  const int64_t out_frames = resampler.output_length(frames);
+  std::vector<float> out(signals * out_frames);
+  std::vector<std::future<void>> jobs;
+  for (int s = 0; s < signals; ++s) {
+    jobs.push_back(std::async(std::launch::async, [&, s] {
+      const std::vector<float> resampled = resampler.run(audio + s * frames, frames);
+      std::copy(resampled.begin(), resampled.end(), out.begin() + s * out_frames);
+    }));
+  }
+  for (auto& job : jobs) job.get();
+  return out;
+}
+
+}  // namespace
+
+// Same path as the original inference: to 44.1 kHz, separate, back to the input rate.
+Separation separate_track(const ScnetModel& model, const float* audio, int channels, int64_t frames, int samplerate) {
+  if (samplerate == kSamplerate) return {frames, separate_at_model_rate(model, audio, channels, frames)};
+
+  const Resampler to_model(samplerate, kSamplerate);
+  const Resampler back(kSamplerate, samplerate);
+  const int64_t model_frames = to_model.output_length(frames);
+
+  std::vector<float> input = resample_planar(to_model, audio, channels, frames);
+  const std::vector<float> separated = separate_at_model_rate(model, input.data(), channels, model_frames);
+  input = {};
+  return {back.output_length(model_frames), resample_planar(back, separated.data(), kStemCount * channels, model_frames)};
 }
 
 }  // namespace stems

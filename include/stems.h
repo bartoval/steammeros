@@ -57,13 +57,16 @@ int32_t stems_engine_stem_count(const stems_engine* engine);
 const char* stems_engine_stem_name(const stems_engine* engine, int32_t stem);
 
 /* Separates `frames` samples of 1 or 2 channels. Blocks until done.
+ * Any common sample rate works (8000-384000 Hz): the model runs at 44100 Hz and the
+ * audio is resampled to it and back, as the original SCNet inference does.
  * `audio` is planar (channels * frames floats) and is only read during the call.
  * Safe to call from several threads at once on the same engine. */
 stems_status stems_separate(stems_engine* engine, const float* audio, int32_t channels, int64_t frames,
                             int32_t samplerate, stems_result** result, stems_error* error);
 
 /* Output layout: for each stem, for each channel, `frames` samples.
- * Same channel count, sample rate and length as the input. */
+ * Same channel count and sample rate as the input. Same length too at 44100 Hz; at
+ * other rates the resampling round trip can drop a sample, so read stems_result_frames. */
 int32_t stems_result_stem_count(const stems_result* result);
 int32_t stems_result_channels(const stems_result* result);
 int64_t stems_result_frames(const stems_result* result);

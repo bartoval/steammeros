@@ -159,7 +159,15 @@ func TestSeparate(t *testing.T) {
 		}
 	}
 
-	if _, err := engine.Separate(audio, 48000); err == nil {
-		t.Fatal("48 kHz should be rejected for now")
+	// 48 kHz goes through the resampler; the round trip may drop one sample.
+	stems, err = engine.Separate(audio, 48000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(stems[0].Channels[0]); got < frames-1 || got > frames {
+		t.Fatalf("48 kHz: %d frames, want %d or one less", got, frames)
+	}
+	if _, err := engine.Separate(audio, 44056); err == nil {
+		t.Fatal("44056 Hz has no simple ratio to 44100 and should be rejected")
 	}
 }

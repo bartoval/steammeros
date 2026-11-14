@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "onnxruntime_cxx_api.h"
+#include "resample.h"
 #include "scnet.h"
 #include "separator.h"
 #include "stems.h"
@@ -70,7 +71,9 @@ void check_audio(const float* audio, int32_t channels, int64_t frames, int32_t s
   if (frames < 0) throw InvalidArgument("frames must be >= 0");
   if (frames > std::numeric_limits<int64_t>::max() / (stems::kStemCount * 2)) throw InvalidArgument("too many frames");
   if (frames > 0 && !audio) throw InvalidArgument("audio is NULL");
-  if (samplerate != stems::kSamplerate) throw InvalidArgument("only 44100 Hz is supported for now");
+  if (!stems::samplerate_supported(samplerate)) {
+    throw InvalidArgument("unsupported sample rate: use 8000-384000 Hz with a simple ratio to 44100 (e.g. 48000)");
+  }
 
   for (int64_t i = 0; i < channels * frames; ++i) {
     if (!std::isfinite(audio[i])) throw InvalidArgument("audio contains NaN or Inf");
@@ -118,9 +121,10 @@ stems_status stems_separate(stems_engine* engine, const float* audio, int32_t ch
   return guarded(error, STEMS_ERR_MODEL, [&] {
     check_audio(audio, channels, frames, samplerate);
     auto separated = std::make_unique<stems_result>();
+    stems::Separation separation = stems::separate_track(*engine->model, audio, channels, frames, samplerate);
     separated->channels = channels;
-    separated->frames = frames;
-    separated->samples = stems::separate_track(*engine->model, audio, channels, frames);
+    separated->frames = separation.frames;
+    separated->samples = std::move(separation.samples);
     *result = separated.release();
   });
 }
