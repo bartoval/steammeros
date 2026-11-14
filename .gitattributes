@@ -6,4 +6,3 @@ tools/*.py linguist-vendored linguist-detectable=false
 # The native C++ core remains part of the library, outside the language statistics.
 src/** linguist-detectable=false
 include/** linguist-detectable=false
-include/*.h linguist-language=C++  # the C API header belongs to the C++ library
