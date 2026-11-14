@@ -1,12 +1,10 @@
 # stems
 
-Separazione musicale in stem nello stesso processo dell'applicazione: nucleo C++20 con
-API C, pacchetto Go via cgo, collegamento statico. Modello: SCNet-large.
+In-process music source separation: a C++20 core with a C API, a Go package via cgo,
+everything linked statically. Model: SCNet-large.
 
-Stato: gate tecnico CPU della fase 2 superato sul corpus locale. La separazione
-nativa supera la parità per tutti i 60 stem di 12 estratti e tre brani completi.
-Metodo, risultati e attività pendenti in [docs/STATUS.md](docs/STATUS.md) e
-[docs/phase2-validation.md](docs/phase2-validation.md).
+Status: in development, not ready for use yet. Native CPU separation matches the
+original PyTorch model (see Validation below).
 
 ## Build
 
@@ -17,44 +15,54 @@ export PKG_CONFIG_PATH=$PWD/build/pkgconfig
 (cd go && go test ./...)
 ```
 
-`go get` da solo non basta: serve prima compilare l'archivio nativo.
+`go get` alone isn't enough: the native archive has to be built first.
 
-Per build nativa ed esperimenti Python usare ONNX Runtime **1.31.1**, fissato in
-`tools/requirements.lock`. I sorgenti nativi devono corrispondere al commit
-`6af1a932e2286d5c58166085d24c68783033edee` (tag `v1.31.1`), verificato da
-`tools/build_ort.sh` anche quando il checkout esiste già. Lo script rifiuta modifiche
-ai file tracciati. Prima della build CMake eseguire `tools/build_ort.sh`.
+ONNX Runtime is pinned to **1.31.1** (`tools/requirements.lock`), for the native build
+and for the Python tools. `tools/build_ort.sh` checks out commit
+`6af1a932e2286d5c58166085d24c68783033edee` (tag `v1.31.1`), verifies it even when the
+checkout already exists, and refuses local changes to tracked files. The export checks
+the Python ONNX Runtime version; the core checks the linked runtime version before
+creating an engine.
 
-L'export verifica la versione Python prima di elaborare il modello; il nucleo
-verifica la versione del runtime effettivamente collegato prima di creare l'engine.
-L'ambiente Python deve essere aggiornato esplicitamente, per esempio con
-`.venv/bin/python -m pip install 'onnxruntime==1.31.1'`. Dopo l'allineamento occorre
-rieseguire export e confronti: i risultati ottenuti con Python 1.32.0 non attestano
-la parità della build nativa 1.31.1.
+## API
 
-L'API corrente è sincrona e accetta PCM float32 mono o stereo da 8 a 384 kHz: come
-nell'originale, l'audio passa a 44,1 kHz per il modello e torna alla frequenza
-d'ingresso (port di `julius.resample_frac`). Le operazioni asincrone e i budget di
-risorse restano nelle fasi successive; il supporto verificato è Linux x86-64 CPU.
+Synchronous for now: float32 planar PCM, mono or stereo, 8 to 384 kHz. As in the
+original, audio goes to 44.1 kHz for the model and back to the input rate (a port of
+`julius.resample_frac`). Verified on Linux x86-64, CPU.
 
-Con più di un thread, la pipeline prepara lo spettro del segmento successivo e
-ricostruisce quello precedente mentre il modello elabora il segmento corrente.
-Per chiamata mantiene un segmento in preparazione e uno in ricostruzione; le iSTFT usano
-fino a quattro worker su canali indipendenti. L'ordine di ricomposizione resta
-invariato. `threads` regola i thread dell'inferenza, a cui si aggiungono questi
-worker; con `threads=1` tutto resta sequenziale. La chiamata C/Go resta sincrona.
+With more than one thread, the pipeline prepares the next chunk's spectrum and
+reconstructs the previous one while the model runs on the current chunk. Up to four
+workers run the iSTFTs on independent channels; the overlap-add order doesn't change.
+`threads` sets the inference threads, on top of those workers; `threads=1` keeps
+everything sequential.
 
-## Modello
+## Model
 
-SCNet-large di starrytong (commit `5d95bf9`). Licenza MIT anche per i pesi
-([conferma dell'autore](https://github.com/starrytong/SCNet/issues/35#issuecomment-4999873539)).
-Quattro stem (drums, bass, other, vocals), 44,1 kHz stereo. Sorgenti e checksum in
-`models/manifest.json`; i pesi non sono in Git.
+SCNet-large by starrytong (commit `5d95bf9`). MIT license, weights included
+([author's confirmation](https://github.com/starrytong/SCNet/issues/35#issuecomment-4999873539)).
+Four stems (drums, bass, other, vocals), 44.1 kHz stereo. Sources and checksums in
+`models/manifest.json`; the weights aren't in Git.
 
-## Criteri
+## Validation
 
-- Parità con l'originale PyTorch FP32 (con `shifts=0`; l'originale usa uno shift casuale):
-  SNR della differenza ≥ 50 dB per stem; canali, lunghezza e ordine degli stem esatti.
-- Qualità: SDR sul test set di MUSDB18-HQ; calo mediano massimo 0,1 dB per stem.
-  Tracce da [Zenodo 3338373](https://zenodo.org/records/3338373), estratte in `data/musdb18hq/test/`.
-- Build CPU: solo librerie di sistema (libc, libm, libstdc++, libgcc_s).
+- Parity with the original PyTorch FP32 model (with `shifts=0`; the original uses a
+  random shift): SNR of the difference ≥ 50 dB per stem; exact channels, length and
+  stem order.
+- Quality: SDR on the MUSDB18-HQ test set; median drop at most 0.1 dB per stem.
+  Tracks from [Zenodo 3338373](https://zenodo.org/records/3338373), extracted to
+  `data/musdb18hq/test/`.
+- CPU build: system libraries only (libc, libm, libstdc++, libgcc_s).
+
+Reference stems come from the original model (`tools/run_reference.py`); the corpus is
+12 excerpts picked by `tools/make_excerpts.py`, plus full tracks and 48/22.05 kHz inputs.
+
+```sh
+build/separate -model models/scnet-large/scnet-large.onnx -out data/results/native data/excerpts/*/mixture.wav
+.venv/bin/python -I tools/parity.py data/results/native data/results/excerpts-deterministic
+.venv/bin/python -I tools/sdr.py data/results/native data/excerpts --baseline data/results/excerpts-deterministic
+```
+
+## License
+
+Apache-2.0 ([LICENSE](LICENSE)). Third-party components in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
