@@ -8,3 +8,4 @@ __pycache__/
 !/models/manifest.json
 /data/
 *.wav
+/.vscode/

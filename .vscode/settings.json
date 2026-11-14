@@ -1,9 +1,0 @@
-{
-  // C++: use the real compile flags from CMake (needs `cmake -S . -B build` once).
-  "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
-
-  // Go: cgo runs `pkg-config stems`, which lives in build/pkgconfig.
-  "go.toolsEnvVars": {
-    "PKG_CONFIG_PATH": "${workspaceFolder}/build/pkgconfig"
-  }
-}
