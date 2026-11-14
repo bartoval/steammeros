@@ -15,14 +15,16 @@ package stems
 import "C"
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 	"unsafe"
 )
 
 // APIVersion is the C API version this package was written against.
-const APIVersion = 2
+const APIVersion = 3
 
 // Options configures an Engine.
 type Options struct {
@@ -101,12 +103,18 @@ func (e *Engine) StemNames() []string {
 // Separate splits audio into stems. `audio` is planar (audio[channel][sample]), 1 or 2
 // channels of equal length. The result has the same channels and sample rate; its length
 // matches too at 44100 Hz, while other rates can come back a sample shorter.
-// Blocks until done.
-func (e *Engine) Separate(audio [][]float32, sampleRate int) ([]Stem, error) {
+//
+// Blocks until done. Cancelling ctx stops the work within a moment and returns ctx.Err().
+// `progress`, if not nil, gets the fraction done (0 to 1) about every 100 ms, from
+// another goroutine, and 1 at the end.
+func (e *Engine) Separate(ctx context.Context, audio [][]float32, sampleRate int, progress func(float64)) ([]Stem, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	if e.ptr == nil {
 		return nil, ErrClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	if len(audio) == 0 {
 		return nil, &Error{Status: int(C.STEMS_ERR_INVALID_ARGUMENT), Message: "no channels"}
@@ -127,13 +135,34 @@ func (e *Engine) Separate(audio [][]float32, sampleRate int) ([]Stem, error) {
 		input = (*C.float)(unsafe.Pointer(&planar[0]))
 	}
 
+	job := C.stems_job_create()
+	if job == nil {
+		return nil, &Error{Status: int(C.STEMS_ERR_OUT_OF_MEMORY), Message: "out of memory"}
+	}
+	defer C.stems_job_destroy(job)
+
+	// The watcher must be gone before the job is freed: we wait for it right after the call.
+	stop, stopped := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(stopped)
+		watch(ctx, job, progress, stop)
+	}()
+
 	var result *C.stems_result
 	var cerr C.stems_error
-	status := C.stems_separate(e.ptr, input, C.int32_t(len(audio)), C.int64_t(frames), C.int32_t(sampleRate), &result, &cerr)
+	status := C.stems_separate(e.ptr, input, C.int32_t(len(audio)), C.int64_t(frames), C.int32_t(sampleRate), job, &result, &cerr)
+	close(stop)
+	<-stopped
+	if status == C.STEMS_ERR_CANCELLED && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if status != C.STEMS_OK {
 		return nil, toError(&cerr)
 	}
 	defer C.stems_result_destroy(result)
+	if progress != nil {
+		progress(1)
+	}
 
 	// Copy the samples into Go memory so the native result can be freed right away.
 	outFrames := int(C.stems_result_frames(result))
@@ -150,6 +179,28 @@ func (e *Engine) Separate(audio [][]float32, sampleRate int) ([]Stem, error) {
 		}
 	}
 	return stems, nil
+}
+
+// Runs next to a stems_separate call until `stop`: cancels the job when ctx is done,
+// and reports progress on a ticker.
+func watch(ctx context.Context, job *C.stems_job, progress func(float64), stop <-chan struct{}) {
+	var tick <-chan time.Time
+	if progress != nil {
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+		tick = ticker.C
+	}
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ctx.Done():
+			C.stems_job_cancel(job)
+			return
+		case <-tick:
+			progress(float64(C.stems_job_progress(job)))
+		}
+	}
 }
 
 func toError(cerr *C.stems_error) error {

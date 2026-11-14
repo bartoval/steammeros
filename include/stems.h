@@ -13,7 +13,7 @@ extern "C" {
 #endif
 
 /* Version of the C ABI declared by this header. Bumped on breaking changes. */
-#define STEMS_API_VERSION 2u
+#define STEMS_API_VERSION 3u
 
 typedef enum stems_status {
   STEMS_OK = 0,
@@ -21,6 +21,7 @@ typedef enum stems_status {
   STEMS_ERR_MODEL = 2,            /* model file missing/corrupt, or the runtime failed */
   STEMS_ERR_OUT_OF_MEMORY = 3,
   STEMS_ERR_INTERNAL = 4,
+  STEMS_ERR_CANCELLED = 5, /* stopped through stems_job_cancel */
 } stems_status;
 
 /* Filled in by functions that can fail (optional: pass NULL if you don't need it).
@@ -33,6 +34,7 @@ typedef struct stems_error {
 
 typedef struct stems_engine stems_engine;
 typedef struct stems_result stems_result;
+typedef struct stems_job stems_job;
 
 typedef struct stems_engine_options {
   uint32_t struct_size;   /* sizeof(stems_engine_options), lets us add fields later */
@@ -57,13 +59,25 @@ void stems_engine_destroy(stems_engine* engine);
 int32_t stems_engine_stem_count(const stems_engine* engine);
 const char* stems_engine_stem_name(const stems_engine* engine, int32_t stem);
 
+/* A job follows one stems_separate call from other threads: read its progress, or
+ * cancel it. Optional. Create one per call; cancel and progress are thread-safe.
+ * stems_job_create returns NULL when out of memory. */
+stems_job* stems_job_create(void);
+/* Stops the call soon, even in the middle of a chunk; it returns STEMS_ERR_CANCELLED.
+ * Cancelling before the call starts makes it return right away. */
+void stems_job_cancel(stems_job* job);
+/* Fraction of the work done, 0 to 1. */
+double stems_job_progress(const stems_job* job);
+/* Frees the job. Only after the call using it has returned. NULL is a no-op. */
+void stems_job_destroy(stems_job* job);
+
 /* Separates `frames` samples of 1 or 2 channels. Blocks until done.
  * Any common sample rate works (8000-384000 Hz): the model runs at 44100 Hz and the
  * audio is resampled to it and back, as the original SCNet inference does.
  * `audio` is planar (channels * frames floats) and is only read during the call.
- * Safe to call from several threads at once on the same engine. */
+ * `job` may be NULL. Safe to call from several threads at once on the same engine. */
 stems_status stems_separate(stems_engine* engine, const float* audio, int32_t channels, int64_t frames,
-                            int32_t samplerate, stems_result** result, stems_error* error);
+                            int32_t samplerate, stems_job* job, stems_result** result, stems_error* error);
 
 /* Output layout: for each stem, for each channel, `frames` samples.
  * Same channel count and sample rate as the input. Same length too at 44100 Hz; at

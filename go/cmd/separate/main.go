@@ -9,12 +9,14 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/binary"
 	"flag"
 	"fmt"
 	"math"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -28,6 +30,10 @@ func main() {
 	out := flag.String("out", "stems-out", "output folder")
 	threads := flag.Int("threads", 0, "inference threads (0 = automatic; 1 = sequential pipeline)")
 	flag.Parse()
+
+	// Ctrl-C cancels the separation in progress instead of killing the process mid-write.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
 
 	start := time.Now()
 	engine, err := stems.NewEngine(stems.Options{ModelPath: *model, Threads: *threads})
@@ -44,13 +50,16 @@ func main() {
 		}
 
 		start := time.Now()
-		separated, err := engine.Separate(audio, sampleRate)
+		name := outputName(input)
+		showProgress := func(fraction float64) { fmt.Fprintf(os.Stderr, "\r%s: %3.0f%%", name, 100*fraction) }
+		separated, err := engine.Separate(ctx, audio, sampleRate, showProgress)
+		fmt.Fprintln(os.Stderr)
 		if err != nil {
 			fail(fmt.Errorf("%s: %w", input, err))
 		}
 		elapsed := time.Since(start).Seconds()
 
-		dir := filepath.Join(*out, outputName(input))
+		dir := filepath.Join(*out, name)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			fail(err)
 		}
@@ -61,7 +70,7 @@ func main() {
 		}
 
 		seconds := float64(len(audio[0])) / float64(sampleRate)
-		fmt.Printf("%s: %.1f s of audio in %.1f s (RTF %.3f)\n", outputName(input), seconds, elapsed, elapsed/seconds)
+		fmt.Printf("%s: %.1f s of audio in %.1f s (RTF %.3f)\n", name, seconds, elapsed, elapsed/seconds)
 	}
 }
 

@@ -1,11 +1,13 @@
 package stems
 
 import (
+	"context"
 	"errors"
 	"math"
 	"os"
 	"slices"
 	"testing"
+	"time"
 )
 
 const testModel = "../models/scnet-large/scnet-large.onnx"
@@ -50,7 +52,7 @@ func TestSeparateRejectsIncompatibleOutput(t *testing.T) {
 
 			// Fail while the following chunk is being prepared: native workers must
 			// finish before Separate returns the model error and releases buffers.
-			stems, err := engine.Separate([][]float32{make([]float32, 10*44100+1)}, 44100)
+			stems, err := engine.Separate(context.Background(), [][]float32{make([]float32, 10*44100+1)}, 44100, nil)
 			var nativeErr *Error
 			if !errors.As(err, &nativeErr) || nativeErr.Status != 2 { // STEMS_ERR_MODEL
 				t.Fatalf("expected model error, got %v", err)
@@ -94,11 +96,11 @@ func TestSeparatePipelineMatchesSerial(t *testing.T) {
 					audio[c][i] = float32((i*(c+1))%4093-2046) / 8192
 				}
 			}
-			want, err := serial.Separate(audio, 44100)
+			want, err := serial.Separate(context.Background(), audio, 44100, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := parallel.Separate(audio, 44100)
+			got, err := parallel.Separate(context.Background(), audio, 44100, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -146,9 +148,13 @@ func TestSeparate(t *testing.T) {
 		audio[1][i] = float32(0.1 * math.Sin(float64(i)*0.031))
 	}
 
-	stems, err := engine.Separate(audio, 44100)
+	var lastProgress float64
+	stems, err := engine.Separate(context.Background(), audio, 44100, func(p float64) { lastProgress = p })
 	if err != nil {
 		t.Fatal(err)
+	}
+	if lastProgress != 1 {
+		t.Fatalf("last progress %v, want 1", lastProgress)
 	}
 	if len(stems) != 4 || stems[3].Name != "vocals" {
 		t.Fatalf("unexpected stems: %d", len(stems))
@@ -160,14 +166,43 @@ func TestSeparate(t *testing.T) {
 	}
 
 	// 48 kHz goes through the resampler; the round trip may drop one sample.
-	stems, err = engine.Separate(audio, 48000)
+	stems, err = engine.Separate(context.Background(), audio, 48000, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := len(stems[0].Channels[0]); got < frames-1 || got > frames {
 		t.Fatalf("48 kHz: %d frames, want %d or one less", got, frames)
 	}
-	if _, err := engine.Separate(audio, 44056); err == nil {
+	if _, err := engine.Separate(context.Background(), audio, 44056, nil); err == nil {
 		t.Fatal("44056 Hz has no simple ratio to 44100 and should be rejected")
+	}
+}
+
+// A cancelled context must stop the model mid-chunk: one 20 s chunk takes several
+// seconds on CPU, so returning well before that shows ORT's Run was interrupted.
+func TestSeparateCancel(t *testing.T) {
+	if _, err := os.Stat(testModel); err != nil {
+		t.Skip("model not found:", testModel)
+	}
+	engine, err := NewEngine(Options{ModelPath: testModel})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+
+	audio := [][]float32{make([]float32, 60*44100)}
+	for i := range audio[0] {
+		audio[0][i] = float32(0.1 * math.Sin(float64(i)*0.05))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err = engine.Separate(ctx, audio, 44100, nil)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("got %v, want context.DeadlineExceeded", err)
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("took %v to stop", elapsed)
 	}
 }

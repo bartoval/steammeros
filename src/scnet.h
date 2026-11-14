@@ -39,7 +39,8 @@ class ScnetModel {
 
   // `audio`: 2 planar channels of `samples` each (already normalized by the caller).
   Input prepare(const float* audio, int64_t samples) const;
-  Output infer(Input& input) const;
+  // `run_options` can stop a running call from another thread (see Job).
+  Output infer(Input& input, Ort::RunOptions& run_options) const;
   // `out`: kStemCount * 2 * samples floats, [stem][channel][sample].
   void reconstruct(const Output& output, float* out) const;
   bool pipeline_enabled() const { return fft_threads_ > 1; }

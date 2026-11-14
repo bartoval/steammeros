@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "job.h"
 #include "scnet.h"
 
 namespace stems {
@@ -21,7 +22,8 @@ struct Separation {
   int64_t frames = 0;
   std::vector<float> samples;
 };
+// `job` reports progress and can cancel the call (it then throws Cancelled).
 Separation separate_track(const ScnetModel& model, const float* audio, int channels, int64_t frames,
-                          int samplerate);
+                          int samplerate, Job& job);
 
 }  // namespace stems

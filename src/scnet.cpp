@@ -73,7 +73,7 @@ ScnetModel::Input ScnetModel::prepare(const float* audio, int64_t samples) const
   return {samples, frames, std::move(spectrum)};
 }
 
-ScnetModel::Output ScnetModel::infer(Input& prepared) const {
+ScnetModel::Output ScnetModel::infer(Input& prepared, Ort::RunOptions& run_options) const {
   const int64_t frames = prepared.frames;
   // Run the network: (1, 4, bins, frames) -> (1, 16, bins, frames).
   const auto memory = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
@@ -82,7 +82,7 @@ ScnetModel::Output ScnetModel::infer(Input& prepared) const {
                                                      prepared.spectrum.size(), shape.data(), shape.size());
   const char* input_names[] = {"spectrum"};
   const char* output_names[] = {"stems"};
-  auto outputs = session_->Run(Ort::RunOptions{nullptr}, input_names, &input, 1, output_names, 1);
+  auto outputs = session_->Run(run_options, input_names, &input, 1, output_names, 1);
   if (outputs.size() != 1 || !outputs[0].IsTensor()) {
     throw Ort::Exception("incompatible model output: expected one stems tensor", ORT_INVALID_GRAPH);
   }

@@ -26,9 +26,17 @@ creating an engine.
 
 ## API
 
-Synchronous for now: float32 planar PCM, mono or stereo, 8 to 384 kHz. As in the
-original, audio goes to 44.1 kHz for the model and back to the input rate (a port of
-`julius.resample_frac`). Verified on Linux x86-64, CPU.
+Float32 planar PCM, mono or stereo, 8 to 384 kHz. As in the original, audio goes to
+44.1 kHz for the model and back to the input rate (a port of `julius.resample_frac`).
+Verified on Linux x86-64, CPU.
+
+The call blocks; an optional `stems_job` lets other threads read its progress and
+cancel it, which also interrupts the model mid-chunk. In Go:
+
+```go
+stems, err := engine.Separate(ctx, audio, sampleRate, func(done float64) { /* 0..1 */ })
+// cancelling ctx stops the work and returns ctx.Err()
+```
 
 With more than one thread, the pipeline prepares the next chunk's spectrum and
 reconstructs the previous one while the model runs on the current chunk. Up to four

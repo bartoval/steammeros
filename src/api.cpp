@@ -18,6 +18,10 @@ struct stems_engine {
   std::unique_ptr<stems::ScnetModel> model;
 };
 
+struct stems_job {
+  stems::Job job;
+};
+
 struct stems_result {
   int32_t channels = 0;
   int64_t frames = 0;
@@ -55,6 +59,8 @@ stems_status guarded(stems_error* error, stems_status runtime_failure, Body&& bo
     return succeed(error);
   } catch (const InvalidArgument& e) {
     return fail(error, STEMS_ERR_INVALID_ARGUMENT, e.what());
+  } catch (const stems::Cancelled&) {
+    return fail(error, STEMS_ERR_CANCELLED, "cancelled");
   } catch (const std::bad_alloc&) {
     return fail(error, STEMS_ERR_OUT_OF_MEMORY, "out of memory");
   } catch (const Ort::Exception& e) {
@@ -116,16 +122,37 @@ const char* stems_engine_stem_name(const stems_engine*, int32_t stem) {
   return stems::kStemNames[stem];
 }
 
+stems_job* stems_job_create(void) {
+  try {
+    return new stems_job();
+  } catch (...) {
+    return nullptr;
+  }
+}
+
+void stems_job_cancel(stems_job* job) {
+  if (job) job->job.cancel();
+}
+
+double stems_job_progress(const stems_job* job) { return job ? job->job.progress() : 0.0; }
+
+void stems_job_destroy(stems_job* job) { delete job; }
+
 stems_status stems_separate(stems_engine* engine, const float* audio, int32_t channels, int64_t frames,
-                            int32_t samplerate, stems_result** result, stems_error* error) {
+                            int32_t samplerate, stems_job* job, stems_result** result, stems_error* error) {
   if (!result) return fail(error, STEMS_ERR_INVALID_ARGUMENT, "result is NULL");
   *result = nullptr;
   if (!engine) return fail(error, STEMS_ERR_INVALID_ARGUMENT, "engine is NULL");
 
   return guarded(error, STEMS_ERR_MODEL, [&] {
     check_audio(audio, channels, frames, samplerate);
+    stems_job local;  // no job from the caller: nobody can cancel, progress goes nowhere
+    stems::Job& tracker = job ? job->job : local.job;
+    tracker.throw_if_cancelled();
+
     auto separated = std::make_unique<stems_result>();
-    stems::Separation separation = stems::separate_track(*engine->model, audio, channels, frames, samplerate);
+    stems::Separation separation =
+        stems::separate_track(*engine->model, audio, channels, frames, samplerate, tracker);
     separated->channels = channels;
     separated->frames = separation.frames;
     separated->samples = std::move(separation.samples);

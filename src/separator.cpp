@@ -5,6 +5,7 @@
 #include <future>
 #include <utility>
 
+#include "job.h"
 #include "resample.h"
 
 namespace stems {
@@ -62,7 +63,7 @@ void downmix_in_place(std::vector<float>& stems, int64_t samples) {
 // The original separation at the model rate: chunk, run, blend, denormalize.
 // Returns kStemCount * channels * samples floats, [stem][channel][sample].
 std::vector<float> separate_at_model_rate(const ScnetModel& model, const float* audio, int channels,
-                                          int64_t samples) {
+                                          int64_t samples, Job& job) {
   if (samples == 0) return {};
 
   // The model is stereo: mono input is duplicated on both channels.
@@ -91,6 +92,21 @@ std::vector<float> separate_at_model_rate(const ScnetModel& model, const float* 
     return model.prepare(chunk_in.data(), length);
   };
 
+  // A cancelled job makes ORT abort the Run with an error: report it as a cancellation.
+  const auto infer = [&](ScnetModel::Input& input) {
+    job.throw_if_cancelled();
+    try {
+      return model.infer(input, job.run_options());
+    } catch (const Ort::Exception&) {
+      job.throw_if_cancelled();
+      throw;
+    }
+  };
+
+  // Reconstructions run one at a time, in chunk order, so a plain counter is enough.
+  const int64_t chunks = (samples + kStride - 1) / kStride;
+  int64_t chunks_done = 0;
+
   const auto reconstruct_and_blend = [&](ScnetModel::Output prediction, int64_t offset) {
     const int64_t length = prediction.samples;
     std::vector<float> chunk_out(kStemCount * kModelChannels * length);
@@ -101,12 +117,13 @@ std::vector<float> separate_at_model_rate(const ScnetModel& model, const float* 
       for (int64_t i = 0; i < length; ++i) target[i] += weight[i] * source[i];
     }
     for (int64_t i = 0; i < length; ++i) weight_sum[offset + i] += weight[i];
+    job.set_progress(static_cast<double>(++chunks_done) / chunks);
   };
 
   if (!model.pipeline_enabled() || samples <= kStride) {
     for (int64_t offset = 0; offset < samples; offset += kStride) {
       auto input = prepare(offset);
-      reconstruct_and_blend(model.infer(input), offset);
+      reconstruct_and_blend(infer(input), offset);
     }
   } else {
     // One prepared chunk ahead, one reconstruction behind, one Run at a time.
@@ -120,7 +137,7 @@ std::vector<float> separate_at_model_rate(const ScnetModel& model, const float* 
       if (offset + kStride < samples) {
         prepared = std::async(std::launch::async, prepare, offset + kStride);
       }
-      auto prediction = model.infer(input);
+      auto prediction = infer(input);
       if (reconstructed.valid()) reconstructed.get();
       reconstructed = std::async(std::launch::async, reconstruct_and_blend, std::move(prediction), offset);
     }
@@ -162,16 +179,18 @@ std::vector<float> resample_planar(const Resampler& resampler, const float* audi
 
 // Same path as the original inference: to 44.1 kHz, separate, back to the input rate.
 Separation separate_track(const ScnetModel& model, const float* audio, int channels, int64_t frames,
-                          int samplerate) {
-  if (samplerate == kSamplerate) return {frames, separate_at_model_rate(model, audio, channels, frames)};
+                          int samplerate, Job& job) {
+  if (samplerate == kSamplerate) return {frames, separate_at_model_rate(model, audio, channels, frames, job)};
 
   const Resampler to_model(samplerate, kSamplerate);
   const Resampler back(kSamplerate, samplerate);
   const int64_t model_frames = to_model.output_length(frames);
 
   std::vector<float> input = resample_planar(to_model, audio, channels, frames);
-  const std::vector<float> separated = separate_at_model_rate(model, input.data(), channels, model_frames);
+  const std::vector<float> separated =
+      separate_at_model_rate(model, input.data(), channels, model_frames, job);
   input = {};
+  job.throw_if_cancelled();
   return {back.output_length(model_frames),
           resample_planar(back, separated.data(), kStemCount * channels, model_frames)};
 }
