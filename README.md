@@ -33,6 +33,20 @@ tools/fetch_model.sh
 go run ./cmd/separate -out stems song.mp3   # -> stems/song/{drums,bass,other,vocals}.wav
 ```
 
+### As an HTTP API
+
+[`examples/api`](examples/api/main.go) is a small server around the package. You upload a
+song, follow the job, and download the stems. Uploads are decoded with ffmpeg, and
+separations queue and run one at a time.
+
+```sh
+go run ./examples/api                                  # with STEMS_ORT_LIBRARY set as above
+curl --data-binary @song.mp3 localhost:8080/jobs       # -> {"id":"1","status":"queued",...}
+curl localhost:8080/jobs/1                             # -> {"status":"running","progress":0.4}
+curl -o vocals.wav localhost:8080/jobs/1/stems/vocals  # once "done"
+curl -X DELETE localhost:8080/jobs/1                   # cancels it if running, deletes files
+```
+
 ## Go
 
 ```go
