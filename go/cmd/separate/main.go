@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	"steammeros/stems"
+	stems "github.com/bartoval/steammeros/go"
 )
 
 func main() {
