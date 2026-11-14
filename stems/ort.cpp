@@ -16,6 +16,7 @@ namespace {
 
 std::mutex load_mutex;
 bool loaded = false;
+std::string loaded_request;  // the path the first load asked for ("" = default search)
 
 #ifdef STEMS_ORT_DYNAMIC
 
@@ -64,7 +65,17 @@ const OrtApiBase* open_api_base(const std::string&) { return OrtGetApiBase(); }
 
 void load_onnxruntime(const std::string& library) {
   std::lock_guard lock(load_mutex);
-  if (loaded) return;
+  if (loaded) {
+#ifdef STEMS_ORT_DYNAMIC
+    // One ONNX Runtime per process: asking for another one is a mistake, not a no-op.
+    if (!library.empty() && library != loaded_request) {
+      const std::string current = loaded_request.empty() ? "the default search" : loaded_request;
+      throw Ort::Exception("ONNX Runtime is already loaded from " + current + ", can't also load " + library,
+                           ORT_FAIL);
+    }
+#endif
+    return;
+  }
 
   const OrtApiBase* base = open_api_base(library);
   // Returns null when the runtime is older than the headers we compiled against.
@@ -78,11 +89,7 @@ void load_onnxruntime(const std::string& library) {
   Ort::InitApi(api);
 #endif
   loaded = true;
-}
-
-bool onnxruntime_loaded() {
-  std::lock_guard lock(load_mutex);
-  return loaded;
+  loaded_request = library;
 }
 
 }  // namespace stems

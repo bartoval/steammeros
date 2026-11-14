@@ -8,11 +8,8 @@ namespace stems {
 //
 // Static build (CMake, STEMS_ORT_DYNAMIC unset): ONNX Runtime is linked in, `library`
 // is ignored. Dynamic build (the Go module): loads the shared library at `library`;
-// when empty, $STEMS_ORT_LIBRARY, then the usual system names. The first successful
-// load wins for the whole process. Throws Ort::Exception when it can't load.
+// when empty, $STEMS_ORT_LIBRARY, then the usual system names. Later calls reuse it, and
+// fail if they name a different library. Throws Ort::Exception when it can't load.
 void load_onnxruntime(const std::string& library);
-
-// Whether load_onnxruntime() has succeeded, so the Ort:: classes can be used.
-bool onnxruntime_loaded();
 
 }  // namespace stems

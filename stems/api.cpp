@@ -10,7 +10,6 @@
 
 #include "onnxruntime_cxx_api.h"
 #include "ort.h"
-#include "resample.h"
 #include "scnet.h"
 #include "separator.h"
 #include "stems.h"
@@ -54,7 +53,7 @@ stems_status succeed(stems_error* error) {
 
 // Runs `body` and converts whatever it throws into a status + message.
 template <typename Body>
-stems_status guarded(stems_error* error, stems_status runtime_failure, Body&& body) {
+stems_status guarded(stems_error* error, Body&& body) {
   try {
     body();
     return succeed(error);
@@ -65,7 +64,7 @@ stems_status guarded(stems_error* error, stems_status runtime_failure, Body&& bo
   } catch (const std::bad_alloc&) {
     return fail(error, STEMS_ERR_OUT_OF_MEMORY, "out of memory");
   } catch (const Ort::Exception& e) {
-    return fail(error, runtime_failure, e.what());
+    return fail(error, STEMS_ERR_MODEL, e.what());
   } catch (const std::exception& e) {
     return fail(error, STEMS_ERR_INTERNAL, e.what());
   } catch (...) {
@@ -107,7 +106,7 @@ stems_status stems_engine_create(const stems_engine_options* options, stems_engi
   }
   if (!options->model_path) return fail(error, STEMS_ERR_INVALID_ARGUMENT, "model_path is NULL");
 
-  return guarded(error, STEMS_ERR_MODEL, [&] {
+  return guarded(error, [&] {
     auto created = std::make_unique<stems_engine>();
     const int cuda_device = options->use_cuda ? options->cuda_device : -1;
     stems::load_onnxruntime(options->ort_library ? options->ort_library : "");
@@ -126,7 +125,6 @@ const char* stems_engine_stem_name(const stems_engine*, int32_t stem) {
 }
 
 stems_job* stems_job_create(void) {
-  if (!stems::onnxruntime_loaded()) return nullptr;  // a job holds ORT run options
   try {
     return new stems_job();
   } catch (...) {
@@ -148,7 +146,7 @@ stems_status stems_separate(stems_engine* engine, const float* audio, int32_t ch
   *result = nullptr;
   if (!engine) return fail(error, STEMS_ERR_INVALID_ARGUMENT, "engine is NULL");
 
-  return guarded(error, STEMS_ERR_MODEL, [&] {
+  return guarded(error, [&] {
     check_audio(audio, channels, frames, samplerate);
     stems_job local;  // no job from the caller: nobody can cancel, progress goes nowhere
     stems::Job& tracker = job ? job->job : local.job;

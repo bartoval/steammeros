@@ -5,7 +5,6 @@
 #include <future>
 #include <utility>
 
-#include "job.h"
 #include "resample.h"
 
 namespace stems {
@@ -13,39 +12,86 @@ namespace {
 
 constexpr int64_t kSegment = 20 * kSamplerate;  // apply_model(segment=20)
 constexpr int64_t kStride = kSegment / 2;       // overlap=0.5
-
-// apply_model's blending weight: rises 1..N/2, falls N/2..1, scaled so the peak is 1.
-// Where chunks overlap, each one counts proportionally to how far we are from its edges.
-std::vector<float> triangle_weights() {
-  std::vector<float> weight(kSegment);
-  const float peak = kSegment / 2.0f;
-  for (int64_t i = 0; i < kSegment; ++i) {
-    weight[i] = (i < kSegment / 2 ? i + 1 : kSegment - i) / peak;
-  }
-  return weight;
-}
+constexpr int kSignals = kStemCount * kModelChannels;
+constexpr int kMinSamplerate = 8000;
+constexpr int kMaxSamplerate = 384000;
 
 struct Normalization {
   double mean = 0.0;
   double std = 1.0;
 };
 
-// Mean and standard deviation of the mono downmix, over the whole track
-// (unbiased std, like torch.std). Silence has std 0: we keep 1 instead of
-// dividing by zero (the original would produce NaN there).
-Normalization measure(const std::vector<float>& stereo, int64_t samples) {
-  double sum = 0.0;
-  for (int64_t i = 0; i < samples; ++i) sum += 0.5 * (stereo[i] + stereo[samples + i]);
-  const double mean = sum / samples;
+// The model's input: always stereo (mono is duplicated), normalized by the mono downmix's
+// mean and standard deviation over the whole track (unbiased std, like torch.std).
+// Silence has std 0: we keep 1 instead of dividing by zero (the original gives NaN).
+struct ModelInput {
+  std::vector<float> stereo;  // [channel][sample]
+  Normalization norm;
+};
 
+ModelInput normalized_stereo(const float* audio, int channels, int64_t samples) {
+  ModelInput input{std::vector<float>(kModelChannels * samples), {}};
+  for (int c = 0; c < kModelChannels; ++c) {
+    const float* source = audio + (channels == 1 ? 0 : c) * samples;
+    std::copy(source, source + samples, input.stereo.begin() + c * samples);
+  }
+
+  const float* left = input.stereo.data();
+  const float* right = left + samples;
+  double sum = 0.0;
+  for (int64_t i = 0; i < samples; ++i) sum += 0.5 * (left[i] + right[i]);
+  const double mean = sum / samples;
   double squares = 0.0;
   for (int64_t i = 0; i < samples; ++i) {
-    const double d = 0.5 * (stereo[i] + stereo[samples + i]) - mean;
+    const double d = 0.5 * (left[i] + right[i]) - mean;
     squares += d * d;
   }
   const double std = samples > 1 ? std::sqrt(squares / (samples - 1)) : 0.0;
-  return {mean, std > 0.0 ? std : 1.0};
+  input.norm = {mean, std > 0.0 ? std : 1.0};
+
+  for (float& x : input.stereo) x = static_cast<float>((x - input.norm.mean) / input.norm.std);
+  return input;
 }
+
+// apply_model's blending: each chunk's stems are added with a triangular weight (rising
+// 1..N/2, falling N/2..1, peak 1), then every sample is divided by the weights it got.
+// Where chunks overlap, each counts in proportion to how far we are from its edges.
+class Blender {
+ public:
+  explicit Blender(int64_t samples)
+      : samples_(samples), weight_(kSegment), sum_(kSignals * samples, 0.0f), weight_sum_(samples, 0.0f) {
+    const float peak = kSegment / 2.0f;
+    for (int64_t i = 0; i < kSegment; ++i) weight_[i] = (i < kSegment / 2 ? i + 1 : kSegment - i) / peak;
+  }
+
+  // `chunk`: kSignals planar signals of `length` samples, starting at `offset`.
+  void add(const std::vector<float>& chunk, int64_t length, int64_t offset) {
+    for (int signal = 0; signal < kSignals; ++signal) {
+      float* target = sum_.data() + signal * samples_ + offset;
+      const float* source = chunk.data() + signal * length;
+      for (int64_t i = 0; i < length; ++i) target[i] += weight_[i] * source[i];
+    }
+    for (int64_t i = 0; i < length; ++i) weight_sum_[offset + i] += weight_[i];
+  }
+
+  // Divides by the total weight and undoes the normalization, in place: the sum buffer
+  // already has the [stem][channel][sample] layout, so it becomes the result.
+  std::vector<float> finish(const Normalization& norm) {
+    for (int signal = 0; signal < kSignals; ++signal) {
+      float* stem = sum_.data() + signal * samples_;
+      for (int64_t i = 0; i < samples_; ++i) {
+        stem[i] = static_cast<float>(stem[i] / weight_sum_[i] * norm.std + norm.mean);
+      }
+    }
+    return std::move(sum_);
+  }
+
+ private:
+  int64_t samples_;
+  std::vector<float> weight_;
+  std::vector<float> sum_;         // [stem][channel][sample]
+  std::vector<float> weight_sum_;  // [sample]
+};
 
 // Mono input: averages each stem's two channels into one, turning [stem][2][sample]
 // into [stem][sample]. Stem s is written where stems < s were read, so in place is safe.
@@ -62,100 +108,68 @@ void downmix_in_place(std::vector<float>& stems, int64_t samples) {
 
 // The original separation at the model rate: chunk, run, blend, denormalize.
 // Returns kStemCount * channels * samples floats, [stem][channel][sample].
+//
+// Chunks go through three stages: prepare (STFT), infer (the network), reconstruct and
+// blend (iSTFT). With several workers they overlap: one chunk prepared ahead, one
+// reconstructed behind, one Run at a time. With one worker the same loop runs them in
+// sequence (deferred futures run when waited on). Waiting for the previous
+// reconstruction keeps the blending order, and bounds retained ORT outputs to two.
 std::vector<float> separate_at_model_rate(const ScnetModel& model, const float* audio, int channels,
                                           int64_t samples, Job& job) {
   if (samples == 0) return {};
 
-  // The model is stereo: mono input is duplicated on both channels.
-  std::vector<float> stereo(kModelChannels * samples);
-  for (int c = 0; c < kModelChannels; ++c) {
-    const float* source = audio + (channels == 1 ? 0 : c) * samples;
-    std::copy(source, source + samples, stereo.begin() + c * samples);
-  }
+  ModelInput input = normalized_stereo(audio, channels, samples);
+  Blender blender(samples);
+  RunScope run(job);
+  const int64_t chunks = (samples + kStride - 1) / kStride;
+  int64_t chunks_done = 0;  // reconstructions run one at a time, in order
 
-  const Normalization norm = measure(stereo, samples);
-  for (float& x : stereo) x = static_cast<float>((x - norm.mean) / norm.std);
-
-  // Weighted overlap-add of the chunks.
-  const std::vector<float> weight = triangle_weights();
-  std::vector<float> sum(kStemCount * kModelChannels * samples, 0.0f);
-  std::vector<float> weight_sum(samples, 0.0f);
   const auto prepare = [&](int64_t offset) {
     const int64_t length = std::min(kSegment, samples - offset);
-
-    std::vector<float> chunk_in(kModelChannels * length);
+    std::vector<float> chunk(kModelChannels * length);
     for (int c = 0; c < kModelChannels; ++c) {
-      const float* source = stereo.data() + c * samples + offset;
-      std::copy(source, source + length, chunk_in.begin() + c * length);
+      const float* source = input.stereo.data() + c * samples + offset;
+      std::copy(source, source + length, chunk.begin() + c * length);
     }
-
-    return model.prepare(chunk_in.data(), length);
+    return model.prepare(chunk.data(), length);
   };
 
   // A cancelled job makes ORT abort the Run with an error: report it as a cancellation.
-  const auto infer = [&](ScnetModel::Input& input) {
+  const auto infer = [&](ScnetModel::Input& prepared) {
     job.throw_if_cancelled();
     try {
-      return model.infer(input, job.run_options());
+      return model.infer(prepared, run.options());
     } catch (const Ort::Exception&) {
       job.throw_if_cancelled();
       throw;
     }
   };
 
-  // Reconstructions run one at a time, in chunk order, so a plain counter is enough.
-  const int64_t chunks = (samples + kStride - 1) / kStride;
-  int64_t chunks_done = 0;
-
   const auto reconstruct_and_blend = [&](ScnetModel::Output prediction, int64_t offset) {
-    const int64_t length = prediction.samples;
-    std::vector<float> chunk_out(kStemCount * kModelChannels * length);
-    model.reconstruct(prediction, chunk_out.data());
-    for (int64_t signal = 0; signal < kStemCount * kModelChannels; ++signal) {
-      float* target = sum.data() + signal * samples + offset;
-      const float* source = chunk_out.data() + signal * length;
-      for (int64_t i = 0; i < length; ++i) target[i] += weight[i] * source[i];
-    }
-    for (int64_t i = 0; i < length; ++i) weight_sum[offset + i] += weight[i];
+    std::vector<float> chunk(kSignals * prediction.samples);
+    model.reconstruct(prediction, chunk.data());
+    blender.add(chunk, prediction.samples, offset);
     job.set_progress(static_cast<double>(++chunks_done) / chunks);
   };
 
-  if (!model.pipeline_enabled() || samples <= kStride) {
-    for (int64_t offset = 0; offset < samples; offset += kStride) {
-      auto input = prepare(offset);
-      reconstruct_and_blend(infer(input), offset);
-    }
-  } else {
-    // One prepared chunk ahead, one reconstruction behind, one Run at a time.
-    // Waiting for the previous reconstruction preserves overlap-add order and
-    // bounds retained ORT outputs to two, independent of track length.
-    // Futures join on all exits, including exceptions, before captured buffers die.
-    auto prepared = std::async(std::launch::async, prepare, int64_t{0});
-    std::future<void> reconstructed;
-    for (int64_t offset = 0; offset < samples; offset += kStride) {
-      auto input = prepared.get();
-      if (offset + kStride < samples) {
-        prepared = std::async(std::launch::async, prepare, offset + kStride);
-      }
-      auto prediction = infer(input);
-      if (reconstructed.valid()) reconstructed.get();
-      reconstructed = std::async(std::launch::async, reconstruct_and_blend, std::move(prediction), offset);
-    }
-    reconstructed.get();
+  // Futures are declared after everything they capture, so they're joined first,
+  // also when an exception leaves the loop.
+  const auto policy = model.workers() > 1 ? std::launch::async : std::launch::deferred;
+  auto prepared = std::async(policy, prepare, int64_t{0});
+  std::future<void> reconstructed;
+  for (int64_t offset = 0; offset < samples; offset += kStride) {
+    auto chunk_input = prepared.get();
+    if (offset + kStride < samples) prepared = std::async(policy, prepare, offset + kStride);
+    auto prediction = infer(chunk_input);
+    if (reconstructed.valid()) reconstructed.get();
+    reconstructed = std::async(policy, reconstruct_and_blend, std::move(prediction), offset);
   }
+  reconstructed.get();
 
-  stereo = {};  // the normalized input isn't needed anymore
-
-  // Divide by the total weight and undo the normalization. Done in place: `sum`
-  // already has the [stem][channel][sample] layout, so it becomes the result.
-  for (int64_t signal = 0; signal < kStemCount * kModelChannels; ++signal) {
-    float* stem = sum.data() + signal * samples;
-    for (int64_t i = 0; i < samples; ++i) {
-      stem[i] = static_cast<float>(stem[i] / weight_sum[i] * norm.std + norm.mean);
-    }
-  }
-  if (channels == 1) downmix_in_place(sum, samples);
-  return sum;
+  input.stereo = {};  // not needed anymore: free it before allocating the result
+  std::vector<float> stems = blender.finish(input.norm);
+  if (channels == 1) downmix_in_place(stems, samples);
+  return stems;
 }
 
 // Resamples each of `signals` planar channels, one thread per channel.
@@ -163,19 +177,24 @@ std::vector<float> resample_planar(const Resampler& resampler, const float* audi
                                    int64_t frames) {
   const int64_t out_frames = resampler.output_length(frames);
   std::vector<float> out(signals * out_frames);
-  std::vector<std::future<void>> jobs;
-  jobs.reserve(signals);
+  std::vector<std::future<void>> workers;
+  workers.reserve(signals);
   for (int s = 0; s < signals; ++s) {
-    jobs.push_back(std::async(std::launch::async, [&, s] {
+    workers.push_back(std::async(std::launch::async, [&, s] {
       const std::vector<float> resampled = resampler.run(audio + s * frames, frames);
       std::copy(resampled.begin(), resampled.end(), out.begin() + s * out_frames);
     }));
   }
-  for (auto& job : jobs) job.get();
+  for (auto& worker : workers) worker.get();
   return out;
 }
 
 }  // namespace
+
+bool samplerate_supported(int samplerate) {
+  if (samplerate < kMinSamplerate || samplerate > kMaxSamplerate) return false;
+  return resampling_practical(samplerate, kSamplerate) && resampling_practical(kSamplerate, samplerate);
+}
 
 // Same path as the original inference: to 44.1 kHz, separate, back to the input rate.
 Separation separate_track(const ScnetModel& model, const float* audio, int channels, int64_t frames,

@@ -45,11 +45,12 @@ class ScnetModel {
   Output infer(Input& input, Ort::RunOptions& run_options) const;
   // `out`: kStemCount * 2 * samples floats, [stem][channel][sample].
   void reconstruct(const Output& output, float* out) const;
-  bool pipeline_enabled() const { return fft_threads_ > 1; }
+  // Threads for the CPU-side stages: the caller can overlap chunks when there's more than one.
+  int workers() const { return workers_; }
 
  private:
   std::unique_ptr<Ort::Session> session_;
-  int fft_threads_ = 1;
+  int workers_ = 1;  // iSTFT threads in reconstruct(), at most four
 };
 
 }  // namespace stems

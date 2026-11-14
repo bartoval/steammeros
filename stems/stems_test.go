@@ -173,8 +173,8 @@ func TestSeparate(t *testing.T) {
 	if got := len(stems[0].Channels[0]); got < frames-1 || got > frames {
 		t.Fatalf("48 kHz: %d frames, want %d or one less", got, frames)
 	}
-	if _, err := engine.Separate(context.Background(), audio, 44056, nil); err == nil {
-		t.Fatal("44056 Hz has no simple ratio to 44100 and should be rejected")
+	if _, err := engine.Separate(context.Background(), audio, 44056, nil); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("44056 Hz has no simple ratio to 44100: got %v, want ErrInvalidArgument", err)
 	}
 }
 

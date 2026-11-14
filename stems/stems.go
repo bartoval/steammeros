@@ -23,7 +23,7 @@ import (
 )
 
 // APIVersion is the C API version this package was written against.
-const APIVersion = 3
+const APIVersion = 4
 
 // Options configures an Engine.
 type Options struct {
@@ -37,7 +37,7 @@ type Options struct {
 
 	// ORTLibrary is the path to ONNX Runtime's shared library (libonnxruntime.so or
 	// .dylib). Empty: $STEMS_ORT_LIBRARY, then the usual system locations (Homebrew
-	// included). The first engine's library is used for the whole process; ignored
+	// included). One library per process: naming a different one later fails. Ignored
 	// with -tags stems_static.
 	ORTLibrary string
 }
@@ -54,7 +54,8 @@ type Stem struct {
 	Channels [][]float32
 }
 
-// Error is returned when the native library reports a failure.
+// Error is returned when the native library reports a failure. Match its kind with
+// errors.Is(err, ErrInvalidArgument) and the other Err values below.
 type Error struct {
 	Status  int
 	Message string
@@ -62,8 +63,23 @@ type Error struct {
 
 func (e *Error) Error() string { return fmt.Sprintf("stems: %s (status %d)", e.Message, e.Status) }
 
-// ErrClosed is returned when using an Engine after Close.
-var ErrClosed = errors.New("stems: engine closed")
+// Is makes errors.Is(err, ErrModel) and friends work on *Error.
+func (e *Error) Is(target error) bool { return statusErrors[e.Status] == target }
+
+var (
+	ErrInvalidArgument = errors.New("stems: invalid argument") // bad audio, sample rate, options...
+	ErrModel           = errors.New("stems: model or runtime failure")
+	ErrOutOfMemory     = errors.New("stems: out of memory")
+	ErrInternal        = errors.New("stems: internal error")
+	ErrClosed          = errors.New("stems: engine closed") // using an Engine after Close
+)
+
+var statusErrors = map[int]error{
+	int(C.STEMS_ERR_INVALID_ARGUMENT): ErrInvalidArgument,
+	int(C.STEMS_ERR_MODEL):            ErrModel,
+	int(C.STEMS_ERR_OUT_OF_MEMORY):    ErrOutOfMemory,
+	int(C.STEMS_ERR_INTERNAL):         ErrInternal,
+}
 
 // Version returns the native library version string.
 func Version() string { return C.GoString(C.stems_version_string()) }
@@ -134,19 +150,9 @@ func (e *Engine) Separate(ctx context.Context, audio [][]float32, sampleRate int
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if len(audio) == 0 {
-		return nil, &Error{Status: int(C.STEMS_ERR_INVALID_ARGUMENT), Message: "no channels"}
-	}
-
-	// The C side wants one contiguous planar buffer. We copy into it instead of handing
-	// over the channel slices: a Go slice of Go slices can't be passed to C.
-	frames := len(audio[0])
-	planar := make([]float32, 0, len(audio)*frames)
-	for c, channel := range audio {
-		if len(channel) != frames {
-			return nil, &Error{Status: int(C.STEMS_ERR_INVALID_ARGUMENT), Message: fmt.Sprintf("channel %d has %d samples, channel 0 has %d", c, len(channel), frames)}
-		}
-		planar = append(planar, channel...)
+	planar, frames, err := toPlanar(audio)
+	if err != nil {
+		return nil, err
 	}
 	var input *C.float
 	if frames > 0 {
@@ -181,22 +187,44 @@ func (e *Engine) Separate(ctx context.Context, audio [][]float32, sampleRate int
 	if progress != nil {
 		progress(1)
 	}
+	return e.copyResult(result), nil
+}
 
-	// Copy the samples into Go memory so the native result can be freed right away.
-	outFrames := int(C.stems_result_frames(result))
+// The C side wants one contiguous planar buffer. We copy into it instead of handing over
+// the channel slices: a Go slice of Go slices can't be passed to C.
+func toPlanar(audio [][]float32) ([]float32, int, error) {
+	if len(audio) == 0 {
+		return nil, 0, &Error{Status: int(C.STEMS_ERR_INVALID_ARGUMENT), Message: "no channels"}
+	}
+	frames := len(audio[0])
+	planar := make([]float32, 0, len(audio)*frames)
+	for c, channel := range audio {
+		if len(channel) != frames {
+			message := fmt.Sprintf("channel %d has %d samples, channel 0 has %d", c, len(channel), frames)
+			return nil, 0, &Error{Status: int(C.STEMS_ERR_INVALID_ARGUMENT), Message: message}
+		}
+		planar = append(planar, channel...)
+	}
+	return planar, frames, nil
+}
+
+// Copies the native result into Go memory, so it can be freed right away.
+func (e *Engine) copyResult(result *C.stems_result) []Stem {
+	frames := int(C.stems_result_frames(result))
+	channels := int(C.stems_result_channels(result))
 	stems := make([]Stem, int(C.stems_result_stem_count(result)))
 	for s := range stems {
 		stems[s].Name = C.GoString(C.stems_engine_stem_name(e.ptr, C.int32_t(s)))
-		stems[s].Channels = make([][]float32, len(audio))
-		for c := range audio {
-			stems[s].Channels[c] = make([]float32, outFrames)
-			if outFrames > 0 {
+		stems[s].Channels = make([][]float32, channels)
+		for c := range channels {
+			stems[s].Channels[c] = make([]float32, frames)
+			if frames > 0 {
 				samples := C.stems_result_samples(result, C.int32_t(s), C.int32_t(c))
-				copy(stems[s].Channels[c], unsafe.Slice((*float32)(unsafe.Pointer(samples)), outFrames))
+				copy(stems[s].Channels[c], unsafe.Slice((*float32)(unsafe.Pointer(samples)), frames))
 			}
 		}
 	}
-	return stems, nil
+	return stems
 }
 
 // Runs next to a stems_separate call until `stop`: cancels the job when ctx is done,

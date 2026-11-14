@@ -6,15 +6,11 @@
 #include <cmath>
 #include <numeric>
 
-#include "scnet.h"
-
 namespace stems {
 namespace {
 
-constexpr int kZeros = 24;          // julius default
-constexpr double kRolloff = 0.945;  // julius default
-constexpr int kMinSamplerate = 8000;
-constexpr int kMaxSamplerate = 384000;
+constexpr int kZeros = 24;                          // julius default
+constexpr double kRolloff = 0.945;                  // julius default
 constexpr int64_t kMaxTableSize = 4 * 1024 * 1024;  // floats, 16 MiB
 
 constexpr double kPi = 3.14159265358979323846;
@@ -34,10 +30,8 @@ int64_t table_size(int from_rate, int to_rate) {
 
 }  // namespace
 
-bool samplerate_supported(int samplerate) {
-  if (samplerate < kMinSamplerate || samplerate > kMaxSamplerate) return false;
-  return table_size(samplerate, kSamplerate) <= kMaxTableSize &&
-         table_size(kSamplerate, samplerate) <= kMaxTableSize;
+bool resampling_practical(int from_rate, int to_rate) {
+  return from_rate > 0 && to_rate > 0 && table_size(from_rate, to_rate) <= kMaxTableSize;
 }
 
 // Builds the filter for each output phase: a sinc at the right sub-sample offset,

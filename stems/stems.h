@@ -15,7 +15,7 @@ extern "C" {
 /* Library version, and version of the C ABI declared by this header (bumped on breaking
  * changes). */
 #define STEMS_VERSION "0.3.0"
-#define STEMS_API_VERSION 3u
+#define STEMS_API_VERSION 4u
 
 typedef enum stems_status {
   STEMS_OK = 0,
@@ -31,7 +31,7 @@ typedef enum stems_status {
  * because goroutines hop between OS threads. */
 typedef struct stems_error {
   stems_status status;
-  char message[256];
+  char message[1024];
 } stems_error;
 
 typedef struct stems_engine stems_engine;
@@ -46,7 +46,7 @@ typedef struct stems_engine_options {
   int32_t cuda_device;    /* which GPU, when use_cuda is set */
   /* Path to the ONNX Runtime shared library (libonnxruntime.so / .dylib), for builds that
    * load it at run time like the Go module. NULL: $STEMS_ORT_LIBRARY, then the usual
-   * system locations. The first engine's library is used for the whole process. Ignored
+   * system locations. One library per process: naming a different one later fails. Ignored
    * by the static build. A GPU build of ONNX Runtime is needed for use_cuda. */
   const char* ort_library;
 } stems_engine_options;
@@ -69,8 +69,8 @@ int32_t stems_engine_stem_count(const stems_engine* engine);
 const char* stems_engine_stem_name(const stems_engine* engine, int32_t stem);
 
 /* A job follows one stems_separate call from other threads: read its progress, or
- * cancel it. Optional. Create one per call, after creating an engine; cancel and progress
- * are thread-safe. stems_job_create returns NULL when out of memory or with no engine yet. */
+ * cancel it. Optional. Create one per call; cancel and progress are thread-safe.
+ * stems_job_create returns NULL when out of memory. */
 stems_job* stems_job_create(void);
 /* Stops the call soon, even in the middle of a chunk; it returns STEMS_ERR_CANCELLED.
  * Cancelling before the call starts makes it return right away. */

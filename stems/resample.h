@@ -5,10 +5,9 @@
 
 namespace stems {
 
-// Whether a track at `samplerate` can go to the model's 44.1 kHz and back.
-// Rejects rates whose ratio to 44100 doesn't simplify (e.g. 44056 Hz): their
-// filter table would take gigabytes.
-bool samplerate_supported(int samplerate);
+// Whether Resampler(from_rate, to_rate) stays small. Rates whose ratio doesn't simplify
+// (e.g. 44056 -> 44100 Hz) would need a filter table of gigabytes.
+bool resampling_practical(int from_rate, int to_rate);
 
 // Port of julius.resample_frac (the resampler the original SCNet inference uses):
 // windowed-sinc polyphase filter, 24 zero crossings, cutoff at 94.5% of the lower Nyquist.

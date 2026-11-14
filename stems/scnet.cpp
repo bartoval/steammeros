@@ -50,7 +50,7 @@ void use_cuda(Ort::SessionOptions& options, int device) {
 
 ScnetModel::ScnetModel(const std::string& onnx_path, int threads, int cuda_device) {
   if (threads <= 0) threads = std::max(1u, std::thread::hardware_concurrency() / 2);
-  fft_threads_ = std::min(threads, 4);
+  workers_ = std::min(threads, 4);
 
   Ort::SessionOptions options;
   options.SetIntraOpNumThreads(threads);
@@ -122,7 +122,7 @@ void ScnetModel::reconstruct(const Output& output, float* out) const {
   // and overlap-add order. At most four reconstruction workers, even on large CPUs.
   const auto reconstruct_channels = [&](int worker) {
     std::vector<float> signal(kHop * (frames - 1));
-    for (int channel = worker; channel < kStemCount * kModelChannels; channel += fft_threads_) {
+    for (int channel = worker; channel < kStemCount * kModelChannels; channel += workers_) {
       const float* real = result + 2 * channel * plane;
       const float* imag = result + (2 * channel + 1) * plane;
       istft(real, imag, frames, signal.data());
@@ -130,8 +130,8 @@ void ScnetModel::reconstruct(const Output& output, float* out) const {
     }
   };
   std::vector<std::future<void>> workers;
-  workers.reserve(fft_threads_ - 1);
-  for (int worker = 1; worker < fft_threads_; ++worker) {
+  workers.reserve(workers_ - 1);
+  for (int worker = 1; worker < workers_; ++worker) {
     workers.push_back(std::async(std::launch::async, reconstruct_channels, worker));
   }
   reconstruct_channels(0);
