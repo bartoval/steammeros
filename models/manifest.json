@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "models": [
+    {
+      "id": "scnet-large-starrytong",
+      "architecture": "SCNet (Sparse Compression Network), large variant",
+      "paper": "https://arxiv.org/abs/2401.13276",
+      "code": {
+        "repository": "https://github.com/starrytong/SCNet",
+        "commit": "5d95bf96b19c3eede63248d171efeca8e3abb948",
+        "license": "MIT"
+      },
+      "weights_license": {
+        "license": "MIT",
+        "evidence": "https://github.com/starrytong/SCNet/issues/35#issuecomment-4999873539 (author starrytong, 2026-07-17): released SCNet and SCNet-large weights are MIT; redistribution of original and converted (ONNX) versions allowed with attribution",
+        "attribution": "SCNet by Weinan Tong et al. (starrytong), MIT License"
+      },
+      "files": {
+        "checkpoint": {
+          "path": "scnet-large/SCNet-large.th",
+          "source": "https://drive.google.com/file/d/1s7QvQwn8ag9oVstGDBQ6KZvacJkvyK7t",
+          "download": "https://drive.usercontent.google.com/download?id=1s7QvQwn8ag9oVstGDBQ6KZvacJkvyK7t&export=download&confirm=t",
+          "size": 168848417,
+          "sha256": "719e5abb8ed920305dad546ac3cd6fb0b1e9c3092d14ce21827bfc0423af3070",
+          "format": "torch.save dict {'best_state': state_dict}, 372 float32 tensors, 42,181,232 parameters"
+        },
+        "config": {
+          "path": "scnet-large/config.yaml",
+          "source": "https://drive.google.com/file/d/1qxK7SZx6-Gsp1s3wCrj98X7--UcI4O3K",
+          "download": "https://drive.usercontent.google.com/download?id=1qxK7SZx6-Gsp1s3wCrj98X7--UcI4O3K&export=download&confirm=t",
+          "size": 1080,
+          "sha256": "629a4901184bf1d3a75b0b13904f35974785aa042cad3c010fd576248cdce3f0"
+        }
+      },
+      "io": {
+        "samplerate": 44100,
+        "channels": 2,
+        "sources": ["drums", "bass", "other", "vocals"],
+        "training_data": "MUSDB18-HQ train split"
+      }
+    }
+  ]
+}
