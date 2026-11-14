@@ -43,6 +43,10 @@ ScnetModel::ScnetModel(const std::string& onnx_path, int threads) {
   options.SetIntraOpNumThreads(threads);
   options.SetInterOpNumThreads(1);
   options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+  // The memory pattern pre-plans one big block per input shape and keeps it. Our chunks
+  // come in several lengths, so those blocks pile up: off, peak RAM per 20 s chunk drops
+  // from ~9.4 to ~5.5 GiB at the same speed.
+  options.DisableMemPattern();
   session_ = std::make_unique<Ort::Session>(ort_env(), onnx_path.c_str(), options);
 }
 

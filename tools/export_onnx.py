@@ -27,7 +27,7 @@ import torch.nn.functional as F
 import yaml
 from ml_collections import ConfigDict
 
-from scnet.SCNet import SCNet
+from scnet.SCNet import FusionLayer, SCNet
 from scnet.separation import FeatureConversion
 from scnet.utils import load_model
 
@@ -145,6 +145,27 @@ def group_norm_two_pass(self, x):
     return normalized * self.weight.view(affine_shape) + self.bias.view(affine_shape)
 
 
+# Drop-in replacement for FusionLayer.forward (decoder). The original duplicates the
+# channels (x.repeat(1, 2, 1, 1)), runs a conv over 2C channels, then GLU splits the result
+# in half. A conv over [x, x] equals a conv over x with the two weight halves summed, and
+# GLU's halves can come from two separate convs. Same math, without the ~300 MB channel
+# copy and the ~300 MB Split copy per decoder layer.
+def fusion_layer_folded(self, x, skip=None):
+    if skip is not None:
+        x = x + skip
+    conv = self.conv
+    half_in = conv.weight.shape[1] // 2
+    half_out = conv.weight.shape[0] // 2
+    weight = conv.weight[:, :half_in] + conv.weight[:, half_in:]
+
+    def half_conv(rows):
+        return F.conv2d(x, weight[rows], conv.bias[rows], stride=conv.stride, padding=conv.padding)
+
+    values = half_conv(slice(0, half_out))
+    gates = half_conv(slice(half_out, None))
+    return values * torch.sigmoid(gates)
+
+
 @contextmanager
 def export_rewrites(model):
     # Patch only this model, then restore it so later references stay original.
@@ -156,6 +177,8 @@ def export_rewrites(model):
                 replacement = feature_conversion_as_matmul
             elif isinstance(module, torch.nn.GroupNorm):
                 replacement = group_norm_two_pass
+            elif isinstance(module, FusionLayer):
+                replacement = fusion_layer_folded
             if replacement is not None:
                 saved.append((module, module.__dict__.get("forward")))
                 module.forward = MethodType(replacement, module)
