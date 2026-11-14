@@ -50,9 +50,8 @@ ScnetModel::ScnetModel(const std::string& onnx_path, int threads) {
   // come in several lengths, so those blocks pile up: off, peak RAM per 20 s chunk drops
   // from ~9.4 to ~5.5 GiB at the same speed.
   options.DisableMemPattern();
-  // The arena rounds blocks up and never gives them back; plain malloc does, so the
-  // peak drops by another ~300 MB, again at the same speed.
-  options.DisableCpuMemArena();
+  // Keep the CPU arena: without it a 25 s excerpt peaks ~300 MB lower, but a 4 min
+  // track ~450 MB higher (malloc fragments over many chunks).
   session_ = std::make_unique<Ort::Session>(ort_env(), onnx_path.c_str(), options);
 }
 
