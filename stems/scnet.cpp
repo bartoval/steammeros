@@ -48,7 +48,8 @@ void use_cuda(Ort::SessionOptions& options, int device) {
 
 }  // namespace
 
-ScnetModel::ScnetModel(const std::string& onnx_path, int threads, int cuda_device) {
+ScnetModel::ScnetModel(const std::string& onnx_path, int threads, int cuda_device,
+                       const std::string& cuda_ops_library) {
   if (threads <= 0) threads = std::max(1u, std::thread::hardware_concurrency() / 2);
   workers_ = std::min(threads, 4);
 
@@ -65,7 +66,17 @@ ScnetModel::ScnetModel(const std::string& onnx_path, int threads, int cuda_devic
 
   Ort::Env& env = ort_env();  // before the CUDA options: ORT logs through it
   if (cuda_device >= 0) use_cuda(options, cuda_device);
-  session_ = std::make_unique<Ort::Session>(env, onnx_path.c_str(), options);
+  if (!cuda_ops_library.empty()) options.RegisterCustomOpsLibrary(cuda_ops_library.c_str());
+  try {
+    session_ = std::make_unique<Ort::Session>(env, onnx_path.c_str(), options);
+  } catch (const Ort::Exception& e) {
+    if (cuda_ops_library.empty() && std::string(e.what()).find("com.steammeros.cuda") != std::string::npos) {
+      throw Ort::Exception(
+          std::string(e.what()) + " (the fast GPU model needs CUDA and libstems_cuda_ops.so)",
+          e.GetOrtErrorCode());
+    }
+    throw;
+  }
 }
 
 ScnetModel::~ScnetModel() = default;

@@ -14,8 +14,8 @@ extern "C" {
 
 /* Library version, and version of the C ABI declared by this header (bumped on breaking
  * changes). */
-#define STEMS_VERSION "0.3.0"
-#define STEMS_API_VERSION 4u
+#define STEMS_VERSION "0.4.0"
+#define STEMS_API_VERSION 5u
 
 typedef enum stems_status {
   STEMS_OK = 0,
@@ -49,6 +49,9 @@ typedef struct stems_engine_options {
    * system locations. One library per process: naming a different one later fails. Ignored
    * by the static build. A GPU build of ONNX Runtime is needed for use_cuda. */
   const char* ort_library;
+  /* Path to libstems_cuda_ops.so, needed by the fast GPU model (scnet-large-cuda.onnx).
+   * NULL for the standard model. Needs use_cuda. */
+  const char* cuda_ops_library;
 } stems_engine_options;
 
 /* Returns STEMS_API_VERSION of the linked library. */

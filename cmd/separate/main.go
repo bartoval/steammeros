@@ -27,6 +27,7 @@ func main() {
 	threads := flag.Int("threads", 0, "inference threads (0 = automatic; 1 = sequential pipeline)")
 	cuda := flag.Int("cuda", -1, "run the model on this GPU (needs a GPU build of ONNX Runtime); -1 = CPU")
 	ort := flag.String("ort", "", "ONNX Runtime shared library (default: $STEMS_ORT_LIBRARY, then system locations)")
+	cudaOps := flag.String("cuda-ops", "", "libstems_cuda_ops.so, for the fast GPU model (scnet-large-cuda.onnx)")
 	flag.Parse()
 
 	// Ctrl-C cancels the separation in progress instead of killing the process mid-write.
@@ -36,6 +37,7 @@ func main() {
 	start := time.Now()
 	engine, err := stems.NewEngine(stems.Options{
 		ModelPath: *model, Threads: *threads, CUDA: *cuda >= 0, CUDADevice: *cuda, ORTLibrary: *ort,
+		CUDAOpsLibrary: *cudaOps,
 	})
 	if err != nil {
 		fail(err)

@@ -35,8 +35,9 @@ class ScnetModel {
   };
 
   // Needs load_onnxruntime() first. `cuda_device` >= 0 runs the network on that GPU (STFT and the rest stay
-  // on the CPU); -1 runs everything on the CPU.
-  ScnetModel(const std::string& onnx_path, int threads, int cuda_device);
+  // on the CPU); -1 runs everything on the CPU. `cuda_ops_library`: libstems_cuda_ops.so for the fast GPU
+  // model, empty otherwise.
+  ScnetModel(const std::string& onnx_path, int threads, int cuda_device, const std::string& cuda_ops_library);
   ~ScnetModel();
 
   // `audio`: 2 planar channels of `samples` each (already normalized by the caller).

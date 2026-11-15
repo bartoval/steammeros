@@ -12,6 +12,13 @@ import (
 
 const testModel = "../models/scnet-large/scnet-large.onnx"
 
+func TestCUDAOperatorsRequireCUDA(t *testing.T) {
+	_, err := NewEngine(Options{ModelPath: "testdata/repeat-spectrum.onnx", CUDAOpsLibrary: "missing.so"})
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("got %v, want ErrInvalidArgument", err)
+	}
+}
+
 func TestStemNamesConcurrentClose(t *testing.T) {
 	engine, err := NewEngine(Options{ModelPath: "testdata/wrong-output-shape.onnx", Threads: 1})
 	if err != nil {

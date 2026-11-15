@@ -105,12 +105,17 @@ stems_status stems_engine_create(const stems_engine_options* options, stems_engi
     return fail(error, STEMS_ERR_INVALID_ARGUMENT, "options missing or struct_size too small");
   }
   if (!options->model_path) return fail(error, STEMS_ERR_INVALID_ARGUMENT, "model_path is NULL");
+  const char* cuda_ops = options->cuda_ops_library ? options->cuda_ops_library : "";
+  if (*cuda_ops && (!options->use_cuda || options->cuda_device < 0)) {
+    return fail(error, STEMS_ERR_INVALID_ARGUMENT, "cuda_ops_library requires use_cuda");
+  }
 
   return guarded(error, [&] {
     auto created = std::make_unique<stems_engine>();
     const int cuda_device = options->use_cuda ? options->cuda_device : -1;
     stems::load_onnxruntime(options->ort_library ? options->ort_library : "");
-    created->model = std::make_unique<stems::ScnetModel>(options->model_path, options->threads, cuda_device);
+    created->model =
+        std::make_unique<stems::ScnetModel>(options->model_path, options->threads, cuda_device, cuda_ops);
     *engine = created.release();
   });
 }

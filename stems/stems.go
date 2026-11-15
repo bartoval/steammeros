@@ -23,7 +23,7 @@ import (
 )
 
 // APIVersion is the C API version this package was written against.
-const APIVersion = 4
+const APIVersion = 5
 
 // Options configures an Engine.
 type Options struct {
@@ -40,6 +40,10 @@ type Options struct {
 	// included). One library per process: naming a different one later fails. Ignored
 	// with -tags stems_static.
 	ORTLibrary string
+
+	// CUDAOpsLibrary is the path to libstems_cuda_ops.so, needed by the fast GPU model
+	// (scnet-large-cuda.onnx, from tools/fetch_model.sh cuda). Requires CUDA (Linux).
+	CUDAOpsLibrary string
 }
 
 // Engine holds the loaded model. Safe for concurrent use; call Close when done.
@@ -99,14 +103,20 @@ func NewEngine(opts Options) (*Engine, error) {
 		ortLibrary = C.CString(opts.ORTLibrary)
 		defer C.free(unsafe.Pointer(ortLibrary))
 	}
+	var cudaOpsLibrary *C.char
+	if opts.CUDAOpsLibrary != "" {
+		cudaOpsLibrary = C.CString(opts.CUDAOpsLibrary)
+		defer C.free(unsafe.Pointer(cudaOpsLibrary))
+	}
 
 	options := C.stems_engine_options{
-		struct_size: C.uint32_t(unsafe.Sizeof(C.stems_engine_options{})),
-		model_path:  path,
-		threads:     C.int32_t(opts.Threads),
-		use_cuda:    C.int32_t(boolToInt(opts.CUDA)),
-		cuda_device: C.int32_t(opts.CUDADevice),
-		ort_library: ortLibrary,
+		struct_size:      C.uint32_t(unsafe.Sizeof(C.stems_engine_options{})),
+		model_path:       path,
+		threads:          C.int32_t(opts.Threads),
+		use_cuda:         C.int32_t(boolToInt(opts.CUDA)),
+		cuda_device:      C.int32_t(opts.CUDADevice),
+		ort_library:      ortLibrary,
+		cuda_ops_library: cudaOpsLibrary,
 	}
 	var engine *C.stems_engine
 	var cerr C.stems_error
