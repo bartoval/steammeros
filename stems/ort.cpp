@@ -1,6 +1,7 @@
 #include "ort.h"
 
 #include <cstdlib>
+#include <filesystem>
 #include <iterator>
 #include <mutex>
 #include <vector>
@@ -30,6 +31,23 @@ const char* const kDefaultLibraries[] = {
     "/usr/local/lib/libonnxruntime.dylib",
 };
 
+// Prepare installs the CUDA runtime beside ORT. Load these libraries by absolute
+// path in dependency order: CUDA providers don't all have an $ORIGIN runpath.
+// Handles stay loaded just like ORT; no process-wide environment changes needed.
+void load_bundled_cuda(const std::string& library) {
+#ifdef __linux__
+  const auto directory = std::filesystem::path(library).parent_path();
+  if (directory.empty()) return;
+  for (const char* name : {"libcudart.so.13", "libnvrtc.so.13", "libcublasLt.so.13", "libcublas.so.13",
+                           "libcurand.so.10", "libcudnn.so.9"}) {
+    const auto path = directory / name;
+    if (std::filesystem::exists(path) && !dlopen(path.c_str(), RTLD_NOW | RTLD_GLOBAL)) {
+      throw Ort::Exception("can't load bundled CUDA library " + path.string() + ": " + dlerror(), ORT_FAIL);
+    }
+  }
+#endif
+}
+
 std::vector<std::string> candidates(const std::string& library) {
   if (!library.empty()) return {library};
   if (const char* env = std::getenv("STEMS_ORT_LIBRARY"); env && *env) return {env};
@@ -40,6 +58,7 @@ std::vector<std::string> candidates(const std::string& library) {
 const OrtApiBase* open_api_base(const std::string& library) {
   std::string last_error = "no candidates";
   for (const std::string& name : candidates(library)) {
+    load_bundled_cuda(name);
     void* handle = dlopen(name.c_str(), RTLD_NOW | RTLD_LOCAL);
     if (!handle) {
       last_error = dlerror();
@@ -77,6 +96,11 @@ void load_onnxruntime(const std::string& library) {
     return;
   }
 
+  // Official ORT binaries include an uploader. Suppress its initialization before
+  // loading ORT, including cached telemetry from earlier runs of other programs.
+  if (setenv("ORT_DISABLE_TELEMETRY", "1", 1) != 0) {
+    throw Ort::Exception("can't disable ONNX Runtime telemetry", ORT_FAIL);
+  }
   const OrtApiBase* base = open_api_base(library);
   // Returns null when the runtime is older than the headers we compiled against.
   const OrtApi* api = base->GetApi(ORT_API_VERSION);

@@ -1,25 +1,10 @@
 # steammeros
 
 A Go library that separates music into **drums, bass, other and vocals**.
-Uses a C++ core, SCNet-large and ONNX Runtime. Runs inside your program, without
-Python at runtime.
+Uses a C++ core, SCNet-large and ONNX Runtime, inside your program.
 
-Early release, tested on Linux x86-64. macOS on Apple Silicon is untested.
-
-## Quick start
-
-Requires **Go 1.26**, a **C++20 compiler**, **ONNX Runtime 1.31+** and the model.
-The command-line tool also needs **ffmpeg** to decode audio.
-
-```sh
-git clone https://github.com/bartoval/steammeros && cd steammeros
-tools/fetch_ort.sh
-export STEMS_ORT_LIBRARY=...       # use the path printed by the script
-tools/fetch_model.sh
-go run ./cmd/separate -out stems song.mp3
-```
-
-Output: `stems/song/{drums,bass,other,vocals}.wav`.
+Requires **Go 1.26** and a **C++20 compiler** (cgo). Tested on Linux x86-64;
+CPU packages also exist for Linux arm64 and Apple Silicon, currently untested.
 
 ## Use in Go
 
@@ -30,9 +15,9 @@ go get github.com/bartoval/steammeros/stems
 ```go
 import "github.com/bartoval/steammeros/stems"
 
-engine, err := stems.NewEngine(stems.Options{
-    ModelPath: "models/scnet-large/scnet-large.onnx",
-})
+opts, err := stems.Prepare(ctx, stems.PrepareOptions{CUDA: true})
+if err != nil { panic(err) }
+engine, err := stems.NewEngine(opts)
 if err != nil { panic(err) }
 defer engine.Close()
 
@@ -40,50 +25,48 @@ parts, err := engine.Separate(ctx, audio, 44100, nil)
 if err != nil { panic(err) }
 ```
 
-- `audio` is planar `[][]float32`: one slice per channel, mono or stereo, at common
-  sample rates from 8 to 384 kHz. Each result has `Name` and `Channels`.
-- Reuse the engine across calls. `Separate` blocks; cancel `ctx` to stop it.
-  Replace `nil` with `func(progress float64)` for progress from 0 to 1.
-- Set `Options.ORTLibrary` or `STEMS_ORT_LIBRARY` to locate ONNX Runtime.
-- Concurrent calls are supported, but each CPU separation needs roughly 7 GB of RAM.
+`Prepare` downloads pinned model/runtime assets once, checks SHA-256 hashes and
+reuses the verified user cache. On Linux x86-64, `CUDA: true` also installs the
+CUDA 13 and cuDNN 9 runtimes; an NVIDIA driver supporting them is required.
+Python, pip and the CUDA toolkit are not needed. Set `CUDA: false` for CPU.
 
-An [HTTP server example](examples/api/main.go) supports uploads, progress,
-cancellation and stem downloads: `go run ./examples/api`.
+- `Offline: true` prevents downloads. `ArchiveDir` can supply the original archives
+  and model files locally; `CacheDir` chooses the installation directory, which can
+  be shipped with your app. Keep the included license files when redistributing.
+- `NewEngine` and `Separate` never download anything. Prepare during installation
+  or explicitly on first use; reuse the engine for subsequent separations.
+- `audio` is planar `[][]float32`: mono or stereo at common rates from 8 to 384 kHz.
+  Each result has `Name` and `Channels`. Cancel `ctx` to stop; replace `nil` with
+  `func(progress float64)` for progress from 0 to 1.
+- Concurrent calls are supported; each CPU separation needs roughly 7 GB of RAM.
+- For custom model/runtime paths, use `NewEngine(Options{...})` directly.
 
-## NVIDIA GPU
+A runnable [consumer example](examples/consumer/main.go) demonstrates preparation
+and inference. An [HTTP example](examples/api/main.go) handles uploads and jobs.
 
-Requires **CUDA 13**, **cuDNN 9** and the GPU build of ONNX Runtime:
+## Command line
 
-```sh
-tools/fetch_ort.sh gpu
-export STEMS_ORT_LIBRARY=...       # use the GPU runtime path printed by the script
-go run ./cmd/separate -cuda 0 -out stems song.mp3
-```
-
-In Go, set `CUDA: true` in the engine options.
-
-### Fast mode (Linux)
-
-A second model runs the LSTMs in FP16 through a small cuDNN library, about **1.6x
-faster**: a 253 s track takes **15.4 s instead of 25.2 s** on an RTX 4060 Laptop GPU,
-with the same VRAM (~6.3 GB).
+From a checkout, with **ffmpeg** installed:
 
 ```sh
-tools/fetch_model.sh cuda          # scnet-large-cuda.onnx and libstems_cuda_ops.so
-go run ./cmd/separate -cuda 0 -model models/scnet-large/scnet-large-cuda.onnx \
-  -cuda-ops models/scnet-large/libstems_cuda_ops.so -out stems song.mp3
+go run ./cmd/separate -prepare -cuda 0 -out stems song.mp3
 ```
 
-In Go, use that `ModelPath` and set `CUDAOpsLibrary`. Separation quality (SDR) matches
-the standard model; outputs differ by a residual typically 70 dB below the signal, so
-this mode isn't held to the parity checks below.
-To build both files yourself: [export_cuda_onnx.py](tools/export_cuda_onnx.py),
-[build_cuda_ops.sh](tools/build_cuda_ops.sh).
+`-prepare` permits the initial download; omit it for later offline runs. Omit
+`-cuda 0` for CPU. Output: `stems/song/{drums,bass,other,vocals}.wav`.
+The library itself accepts audio arrays and does not require ffmpeg.
+
+## Fast GPU mode
+
+Add `Fast: true` to `PrepareOptions{CUDA: true}`, or `-fast` to the CLI.
+This optional Linux x86-64 mode uses FP16 LSTMs with FP32 arithmetic in cuDNN;
+its output differs from the standard FP32 model. The matching operator library
+is installed automatically alongside its model and runtimes.
 
 ## C/C++ and static builds
 
 The [C API](stems/stems.h) supports separation, progress and cancellation.
-To build with ONNX Runtime linked statically on Linux:
+To link ONNX Runtime statically on Linux:
 
 ```sh
 tools/build_ort.sh
@@ -99,10 +82,9 @@ SCNet-large by starrytong, under MIT, including its weights
 ([author's confirmation](https://github.com/starrytong/SCNet/issues/35#issuecomment-4999873539)).
 The checkpoint is recorded in [models/manifest.json](models/manifest.json).
 
-Output is checked against the original PyTorch model: SNR ≥50 dB per stem and ≥40 dB
-in non-silent 1 s windows; median SDR loss ≤0.1 dB per stem. The scripts are
-[parity.py](tools/parity.py) and [sdr.py](tools/sdr.py); Python dependencies are pinned
-in [requirements.lock](tools/requirements.lock).
+The standard FP32 model is checked against original PyTorch: SNR ≥50 dB per stem
+and ≥40 dB in non-silent 1 s windows; median SDR loss ≤0.1 dB per stem.
+See [parity.py](tools/parity.py) and [sdr.py](tools/sdr.py).
 
 ## License
 

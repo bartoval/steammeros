@@ -22,23 +22,44 @@ import (
 )
 
 func main() {
-	model := flag.String("model", "models/scnet-large/scnet-large.onnx", "path to the .onnx model")
+	model := flag.String("model", "", "custom .onnx model (default: prepared model)")
 	out := flag.String("out", "stems-out", "output folder")
 	threads := flag.Int("threads", 0, "inference threads (0 = automatic; 1 = sequential pipeline)")
 	cuda := flag.Int("cuda", -1, "run the model on this GPU (needs a GPU build of ONNX Runtime); -1 = CPU")
 	ort := flag.String("ort", "", "ONNX Runtime shared library (default: $STEMS_ORT_LIBRARY, then system locations)")
 	cudaOps := flag.String("cuda-ops", "", "libstems_cuda_ops.so, for the fast GPU model (scnet-large-cuda.onnx)")
+	prepare := flag.Bool("prepare", false, "allow downloading verified model and runtime assets")
+	cache := flag.String("cache", "", "asset cache directory (default: user cache)")
+	fast := flag.Bool("fast", false, "use the mixed-precision GPU model (requires -cuda)")
 	flag.Parse()
+	if flag.NArg() == 0 {
+		flag.Usage()
+		os.Exit(2)
+	}
 
 	// Ctrl-C cancels the separation in progress instead of killing the process mid-write.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
 	start := time.Now()
-	engine, err := stems.NewEngine(stems.Options{
-		ModelPath: *model, Threads: *threads, CUDA: *cuda >= 0, CUDADevice: *cuda, ORTLibrary: *ort,
-		CUDAOpsLibrary: *cudaOps,
-	})
+	opts := stems.Options{ModelPath: *model, CUDA: *cuda >= 0, ORTLibrary: *ort, CUDAOpsLibrary: *cudaOps}
+	if *model == "" {
+		var err error
+		opts, err = stems.Prepare(ctx, stems.PrepareOptions{CUDA: *cuda >= 0, Fast: *fast, CacheDir: *cache, Offline: !*prepare})
+		if err != nil {
+			fail(err)
+		}
+	} else if *fast || *prepare {
+		fail(fmt.Errorf("-fast and -prepare require the default managed model"))
+	}
+	opts.Threads, opts.CUDADevice = *threads, *cuda
+	if *ort != "" {
+		opts.ORTLibrary = *ort
+	}
+	if *cudaOps != "" {
+		opts.CUDAOpsLibrary = *cudaOps
+	}
+	engine, err := stems.NewEngine(opts)
 	if err != nil {
 		fail(err)
 	}

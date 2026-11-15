@@ -20,7 +20,11 @@ constexpr int64_t kMinSamples = kFftSize;
 
 // One ORT environment for the whole process (ORT wants exactly one, living longest).
 Ort::Env& ort_env() {
-  static Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "stems");
+  static Ort::Env env = [] {
+    Ort::Env result(ORT_LOGGING_LEVEL_WARNING, "stems");
+    result.DisableTelemetryEvents();
+    return result;
+  }();
   return env;
 }
 

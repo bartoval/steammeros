@@ -13,6 +13,10 @@ ONNX Runtime bundles further libraries (abseil, protobuf, re2, Eigen, ...). Bina
 include or ship it must also ship its `ThirdPartyNotices.txt`, found in the ONNX Runtime
 release or in `third_party/onnxruntime/` after `tools/build_ort.sh`.
 
+The optional `Prepare` installer downloads NVIDIA CUDA/cuDNN runtime packages
+from NVIDIA's official PyPI distributions. Their license notices are kept in the
+installation's `licenses/` directory; retain them when shipping those binaries.
+
 ## MIT License (SCNet, julius, ONNX Runtime)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy

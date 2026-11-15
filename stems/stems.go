@@ -1,8 +1,8 @@
 // Package stems separates music into stems (drums, bass, other, vocals) in-process.
 //
 // cgo compiles the C++ core in this directory. ONNX Runtime is loaded at run time from
-// its shared library (see Options.ORTLibrary); build with -tags stems_static to link it
-// statically instead (see README.md).
+// its shared library. Prepare installs the model and runtime; build with -tags
+// stems_static to link the runtime statically instead (see README.md).
 package stems
 
 /*
@@ -25,13 +25,13 @@ import (
 // APIVersion is the C API version this package was written against.
 const APIVersion = 5
 
-// Options configures an Engine.
+// Options configures an Engine. Prepare fills the paths for managed installations.
 type Options struct {
 	ModelPath string // path to the .onnx model
 	Threads   int    // inference threads; 0 = automatic, 1 = sequential pipeline
 
-	// CUDA runs the model on an NVIDIA GPU. Needs a GPU build of ONNX Runtime
-	// (tools/fetch_ort.sh gpu) with CUDA 13 and cuDNN 9 on the system.
+	// CUDA runs the model on an NVIDIA GPU. Prepare with CUDA true installs the
+	// required ONNX Runtime, CUDA 13 and cuDNN 9 libraries; the driver is external.
 	CUDA       bool
 	CUDADevice int // which GPU, when CUDA is set
 
@@ -42,7 +42,7 @@ type Options struct {
 	ORTLibrary string
 
 	// CUDAOpsLibrary is the path to libstems_cuda_ops.so, needed by the fast GPU model
-	// (scnet-large-cuda.onnx, from tools/fetch_model.sh cuda). Requires CUDA (Linux).
+	// (scnet-large-cuda.onnx). Prepare with Fast true installs it. Requires CUDA (Linux).
 	CUDAOpsLibrary string
 }
 
